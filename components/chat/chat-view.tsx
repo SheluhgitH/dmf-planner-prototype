@@ -9,6 +9,7 @@ import { isSupabaseConfigured } from "@/lib/config";
 import { createClient } from "@/lib/data/supabase/client";
 import {
   addReactionAction,
+  getChannelMessagesAction,
   getOlderMessagesAction,
   getThreadRepliesAction,
   markChannelReadAction,
@@ -16,9 +17,15 @@ import {
   sendMessageAction,
   uploadChatAttachmentAction,
 } from "@/lib/actions/chat";
+import {
+  loadCachedMessages,
+  mergeMessageLists,
+  saveCachedMessages,
+} from "@/lib/chat/message-cache";
 import type { Message, MessageReaction, User } from "@/lib/data/types";
 
 const MESSAGE_PAGE_SIZE = 50;
+const INITIAL_MESSAGE_LIMIT = 100;
 
 function mergeReaction(
   reactions: MessageReaction[] | undefined,
@@ -46,28 +53,6 @@ function mergeReaction(
   return list;
 }
 
-function mergeMessages(local: Message[], server: Message[]): Message[] {
-  const localById = new Map(local.map((m) => [m.id, m]));
-  const serverIds = new Set(server.map((m) => m.id));
-
-  const merged = server.map((serverMsg) => {
-    const localMsg = localById.get(serverMsg.id);
-    if (!localMsg?.attachments?.length) return serverMsg;
-    const serverAttCount = serverMsg.attachments?.length ?? 0;
-    const localAttCount = localMsg.attachments?.length ?? 0;
-    if (localAttCount > serverAttCount) {
-      return { ...serverMsg, attachments: localMsg.attachments };
-    }
-    return serverMsg;
-  });
-
-  const localOnly = local.filter((m) => !serverIds.has(m.id));
-  return [...merged, ...localOnly].sort(
-    (a, b) =>
-      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-  );
-}
-
 export function ChatView({
   channelId,
   channelName,
@@ -81,12 +66,15 @@ export function ChatView({
   initialMessages: Message[];
   currentUser: User;
 }) {
-  const [messages, setMessages] = useState(initialMessages);
+  const [messages, setMessages] = useState<Message[]>(() =>
+    mergeMessageLists(loadCachedMessages(channelId), initialMessages)
+  );
   const [threadParent, setThreadParent] = useState<Message | null>(null);
   const [threadReplies, setThreadReplies] = useState<Message[]>([]);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const topRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -94,7 +82,9 @@ export function ChatView({
   const broadcastRef = useRef<ReturnType<
     ReturnType<typeof createClient>["channel"]
   > | null>(null);
-  const [hasMore, setHasMore] = useState(initialMessages.length >= MESSAGE_PAGE_SIZE);
+  const [hasMore, setHasMore] = useState(
+    initialMessages.length >= INITIAL_MESSAGE_LIMIT
+  );
   const [loadingMore, setLoadingMore] = useState(false);
   const messagesRef = useRef(messages);
   const hasMoreRef = useRef(hasMore);
@@ -119,9 +109,84 @@ export function ChatView({
   }, []);
 
   useEffect(() => {
-    setMessages(initialMessages);
-    setHasMore(initialMessages.length >= MESSAGE_PAGE_SIZE);
+    const merged = mergeMessageLists(
+      loadCachedMessages(channelId),
+      initialMessages
+    );
+    setMessages(merged);
+    setHasMore(initialMessages.length >= INITIAL_MESSAGE_LIMIT);
+    setFetchError(null);
   }, [channelId, initialMessages]);
+
+  useEffect(() => {
+    saveCachedMessages(channelId, messages);
+  }, [channelId, messages]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+
+    let cancelled = false;
+    (async () => {
+      const { messages: freshMessages, error } = await getChannelMessagesAction(
+        channelId,
+        INITIAL_MESSAGE_LIMIT
+      );
+      if (cancelled) return;
+      if (error) {
+        setFetchError(error);
+        return;
+      }
+      if (freshMessages?.length) {
+        setMessages((prev) => mergeMessageLists(prev, freshMessages));
+        setHasMore(freshMessages.length >= INITIAL_MESSAGE_LIMIT);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [channelId]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!isSupabaseConfigured() || loadingMoreRef.current || !hasMoreRef.current) {
+      return;
+    }
+
+    const scrollEl = scrollRef.current;
+    const oldestMessageId = messagesRef.current[0]?.id;
+    if (!oldestMessageId) return;
+
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+
+    const scrollHeightBefore = scrollEl?.scrollHeight ?? 0;
+    const { messages: olderMessages, error } = await getOlderMessagesAction(
+      channelId,
+      oldestMessageId,
+      MESSAGE_PAGE_SIZE
+    );
+
+    if (error) {
+      setFetchError(error);
+      setHasMore(false);
+    } else if (olderMessages?.length) {
+      setMessages((prev) => mergeMessageLists(olderMessages, prev));
+      if (olderMessages.length < MESSAGE_PAGE_SIZE) {
+        setHasMore(false);
+      }
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop =
+            scrollRef.current.scrollHeight - scrollHeightBefore;
+        }
+      });
+    } else {
+      setHasMore(false);
+    }
+
+    loadingMoreRef.current = false;
+    setLoadingMore(false);
+  }, [channelId]);
 
   useEffect(() => {
     if (initialMessages.length > 0) {
@@ -144,54 +209,21 @@ export function ChatView({
     if (!isSupabaseConfigured()) return;
 
     const scrollEl = scrollRef.current;
-    if (!scrollEl) return;
+    const topEl = topRef.current;
+    if (!scrollEl || !topEl) return;
 
-    const handleScroll = async () => {
-      if (
-        scrollEl.scrollTop > 80 ||
-        !hasMoreRef.current ||
-        loadingMoreRef.current
-      ) {
-        return;
-      }
-
-      const oldestMessageId = messagesRef.current[0]?.id;
-      if (!oldestMessageId) return;
-
-      loadingMoreRef.current = true;
-      setLoadingMore(true);
-
-      const scrollHeightBefore = scrollEl.scrollHeight;
-      const { messages: olderMessages, error } = await getOlderMessagesAction(
-        channelId,
-        oldestMessageId,
-        MESSAGE_PAGE_SIZE
-      );
-
-      if (error) {
-        setHasMore(false);
-      } else if (olderMessages?.length) {
-        setMessages((prev) => [...olderMessages, ...prev]);
-        if (olderMessages.length < MESSAGE_PAGE_SIZE) {
-          setHasMore(false);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          void loadOlderMessages();
         }
-        requestAnimationFrame(() => {
-          if (scrollRef.current) {
-            scrollRef.current.scrollTop =
-              scrollRef.current.scrollHeight - scrollHeightBefore;
-          }
-        });
-      } else {
-        setHasMore(false);
-      }
+      },
+      { root: scrollEl, rootMargin: "120px", threshold: 0 }
+    );
 
-      loadingMoreRef.current = false;
-      setLoadingMore(false);
-    };
-
-    scrollEl.addEventListener("scroll", handleScroll, { passive: true });
-    return () => scrollEl.removeEventListener("scroll", handleScroll);
-  }, [channelId]);
+    observer.observe(topEl);
+    return () => observer.disconnect();
+  }, [channelId, loadOlderMessages, hasMore]);
 
   const upsertMessage = useCallback((msg: Message) => {
     setMessages((prev) => {
@@ -531,9 +563,25 @@ export function ChatView({
           ref={scrollRef}
         >
           <div ref={topRef} />
+          {fetchError && (
+            <div className="mb-3 rounded-lg border border-red-900/50 bg-red-950/40 px-3 py-2 text-center text-sm text-red-300">
+              {fetchError}
+            </div>
+          )}
           {loadingMore && (
             <div className="py-2 text-center text-sm text-zinc-500">
               Loading older messages...
+            </div>
+          )}
+          {hasMore && !loadingMore && messages.length > 0 && (
+            <div className="pb-3 text-center">
+              <button
+                type="button"
+                onClick={() => void loadOlderMessages()}
+                className="text-sm text-violet-300 hover:text-violet-200"
+              >
+                Load older messages
+              </button>
             </div>
           )}
           <div className="space-y-4">

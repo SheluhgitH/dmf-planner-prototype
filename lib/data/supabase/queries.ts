@@ -171,7 +171,6 @@ type MessageRow = {
   body: string;
   parent_message_id: string | null;
   created_at: string;
-  profiles: { display_name: string; avatar_url: string | null } | { display_name: string; avatar_url: string | null }[] | null;
   message_attachments?: {
     id: string;
     storage_path: string;
@@ -182,11 +181,28 @@ type MessageRow = {
   message_reactions?: { emoji: string; user_id: string }[];
 };
 
-function getProfile(raw: MessageRow["profiles"]) {
-  return (Array.isArray(raw) ? raw[0] : raw) as {
-    display_name: string;
-    avatar_url: string | null;
-  } | null;
+type ProfileRow = {
+  id: string;
+  display_name: string;
+  avatar_url: string | null;
+};
+
+async function fetchProfileMap(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  authorIds: string[]
+): Promise<Map<string, ProfileRow>> {
+  const map = new Map<string, ProfileRow>();
+  if (!authorIds.length) return map;
+
+  const { data } = await supabase
+    .from("profiles")
+    .select("id, display_name, avatar_url")
+    .in("id", authorIds);
+
+  for (const profile of data ?? []) {
+    map.set(profile.id, profile);
+  }
+  return map;
 }
 
 function aggregateReactions(
@@ -211,10 +227,11 @@ function aggregateReactions(
 async function mapMessageRow(
   m: MessageRow,
   replyCounts: Record<string, number>,
+  profileMap: Map<string, ProfileRow>,
   currentUserId?: string,
   signedUrls?: Record<string, string>
 ): Promise<Message> {
-  const profile = getProfile(m.profiles);
+  const profile = profileMap.get(m.author_id);
   const attachments: MessageAttachment[] = (m.message_attachments ?? []).map(
     (a) => ({
       id: a.id,
@@ -261,6 +278,74 @@ async function getSignedUrls(
   return urls;
 }
 
+async function queryMessageRows(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  channelId: string,
+  options: {
+    parentId?: string | null;
+    limit?: number;
+    beforeMessageId?: string;
+  }
+): Promise<MessageRow[]> {
+  const isChannelFeed = options.parentId === undefined;
+  const richSelect = `id, channel_id, author_id, body, parent_message_id, created_at,
+       message_attachments(id, storage_path, file_name, mime_type, file_size),
+       message_reactions(emoji, user_id)`;
+  const baseSelect =
+    "id, channel_id, author_id, body, parent_message_id, created_at";
+
+  let beforeCreatedAt: string | null = null;
+  if (isChannelFeed && options.beforeMessageId) {
+    const { data: beforeMessage } = await supabase
+      .from("messages")
+      .select("created_at")
+      .eq("id", options.beforeMessageId)
+      .single();
+    beforeCreatedAt = beforeMessage?.created_at ?? null;
+  }
+
+  const run = async (select: string) => {
+    let q = supabase.from("messages").select(select).eq("channel_id", channelId);
+
+    if (isChannelFeed) {
+      q = q.is("parent_message_id", null);
+      if (beforeCreatedAt) {
+        q = q.lt("created_at", beforeCreatedAt);
+      }
+      q = q.order("created_at", { ascending: false });
+      if (options.limit) {
+        q = q.limit(options.limit);
+      }
+    } else {
+      q = q.order("created_at", { ascending: true });
+      if (options.parentId) {
+        q = q.eq("parent_message_id", options.parentId);
+      }
+      if (options.limit) {
+        q = q.limit(options.limit);
+      }
+    }
+
+    return q;
+  };
+
+  let { data, error } = await run(richSelect);
+  if (error) {
+    console.error("getMessages rich query failed:", error.message);
+    ({ data, error } = await run(baseSelect));
+  }
+  if (error) {
+    console.error("getMessages failed:", error.message);
+    return [];
+  }
+
+  const rows = (data ?? []) as unknown as MessageRow[];
+  if (isChannelFeed && (options.limit || options.beforeMessageId)) {
+    return [...rows].reverse();
+  }
+  return rows;
+}
+
 export async function getMessages(
   channelId: string,
   options?: {
@@ -275,56 +360,10 @@ export async function getMessages(
     data: { user },
   } = await supabase.auth.getUser();
 
-  const isChannelFeed = options?.parentId === undefined;
+  const rows = await queryMessageRows(supabase, channelId, options ?? {});
 
-  let query = supabase
-    .from("messages")
-    .select(
-      `id, channel_id, author_id, body, parent_message_id, created_at,
-       profiles(display_name, avatar_url),
-       message_attachments(id, storage_path, file_name, mime_type, file_size),
-       message_reactions(emoji, user_id)`
-    )
-    .eq("channel_id", channelId);
-
-  if (isChannelFeed) {
-    query = query.is("parent_message_id", null);
-
-    if (options?.beforeMessageId) {
-      const { data: beforeMessage } = await supabase
-        .from("messages")
-        .select("created_at")
-        .eq("id", options.beforeMessageId)
-        .single();
-      if (beforeMessage) {
-        query = query.lt("created_at", beforeMessage.created_at);
-      }
-    }
-
-    query = query.order("created_at", { ascending: false });
-    if (options?.limit) {
-      query = query.limit(options.limit);
-    }
-  } else {
-    query = query.order("created_at", { ascending: true });
-    if (options?.parentId) {
-      query = query.eq("parent_message_id", options.parentId);
-    }
-    if (options?.limit) {
-      query = query.limit(options.limit);
-    }
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    console.error("getMessages failed:", error.message);
-    return [];
-  }
-  const rows = (
-    isChannelFeed && (options?.limit || options?.beforeMessageId)
-      ? [...(data ?? [])].reverse()
-      : (data ?? [])
-  ) as MessageRow[];
+  const authorIds = [...new Set(rows.map((row) => row.author_id))];
+  const profileMap = await fetchProfileMap(supabase, authorIds);
 
   const { data: replyData } = await supabase
     .from("messages")
@@ -346,7 +385,9 @@ export async function getMessages(
   const signedUrls = await getSignedUrls(supabase, allPaths);
 
   return Promise.all(
-    rows.map((m) => mapMessageRow(m, replyCounts, user?.id, signedUrls))
+    rows.map((m) =>
+      mapMessageRow(m, replyCounts, profileMap, user?.id, signedUrls)
+    )
   );
 }
 

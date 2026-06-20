@@ -7,6 +7,8 @@ import {
   getWorkspace,
 } from "@/lib/data/provider";
 
+export const dynamic = "force-dynamic";
+
 export default async function ChannelPage({
   params,
 }: {
@@ -23,7 +25,7 @@ export default async function ChannelPage({
 
   const [channels, messages, user, workspace] = await Promise.all([
     getChannels(),
-    getMessages(channelId, { limit: 50 }),
+    getMessages(channelId, { limit: 100 }),
     getCurrentUser(),
     getWorkspace(),
   ]);

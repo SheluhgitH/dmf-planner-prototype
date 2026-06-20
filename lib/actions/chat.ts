@@ -141,14 +141,34 @@ export async function markChannelReadAction(
   return {};
 }
 
+export async function getChannelMessagesAction(
+  channelId: string,
+  limit = 100
+): Promise<{ messages?: Message[]; error?: string }> {
+  const { getMessages } = await import("@/lib/data/supabase/queries");
+  try {
+    const messages = await getMessages(channelId, { limit });
+    return { messages };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to load messages";
+    return { error: message };
+  }
+}
+
 export async function getOlderMessagesAction(
   channelId: string,
   beforeMessageId: string,
-  limit = 20
+  limit = 50
 ): Promise<{ messages?: Message[]; error?: string }> {
   const { getMessages } = await import("@/lib/data/supabase/queries");
-  const messages = await getMessages(channelId, { limit, beforeMessageId });
-  return { messages };
+  try {
+    const messages = await getMessages(channelId, { limit, beforeMessageId });
+    return { messages };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Failed to load older messages";
+    return { error: message };
+  }
 }
 
 export async function getThreadRepliesAction(
