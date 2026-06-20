@@ -44,6 +44,26 @@ export async function joinSharedWorkspace(): Promise<string | null> {
 
 export async function getSharedWorkspace(): Promise<Workspace | null> {
   const supabase = await createClient();
+
+  await supabase.rpc("join_shared_workspace");
+
+  const { data: channel } = await supabase
+    .from("channels")
+    .select("workspace_id")
+    .eq("id", "general")
+    .maybeSingle();
+
+  if (channel?.workspace_id) {
+    const { data } = await supabase
+      .from("workspaces")
+      .select("id, name, slug")
+      .eq("id", channel.workspace_id)
+      .maybeSingle();
+    if (data) {
+      return { id: data.id, name: data.name, slug: data.slug };
+    }
+  }
+
   const { data } = await supabase
     .from("workspaces")
     .select("id, name, slug")
@@ -368,6 +388,8 @@ export async function sendMessage(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
+
+  await joinSharedWorkspace();
 
   const { data, error } = await supabase
     .from("messages")

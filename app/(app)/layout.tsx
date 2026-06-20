@@ -15,14 +15,10 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   if (isSupabaseConfigured()) {
-    const { joinSharedWorkspace, getSharedWorkspace } = await import(
+    const { getSharedWorkspace } = await import(
       "@/lib/data/supabase/queries"
     );
-    let shared = await getSharedWorkspace();
-    if (!shared) {
-      await joinSharedWorkspace();
-      shared = await getSharedWorkspace();
-    }
+    const shared = await getSharedWorkspace();
     if (!shared) {
       redirect("/onboarding");
     }

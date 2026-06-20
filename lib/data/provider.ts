@@ -174,15 +174,8 @@ export async function getEvents(): Promise<PlannerEvent[]> {
 
 export async function getWorkspace(): Promise<Workspace> {
   if (isSupabaseConfigured()) {
-    const {
-      getSharedWorkspace,
-      joinSharedWorkspace,
-    } = await import("./supabase/queries");
-    let shared = await getSharedWorkspace();
-    if (!shared) {
-      await joinSharedWorkspace();
-      shared = await getSharedWorkspace();
-    }
+    const { getSharedWorkspace } = await import("./supabase/queries");
+    const shared = await getSharedWorkspace();
     if (shared) return shared;
   }
   const workspaces = await getWorkspaces();
