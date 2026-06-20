@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, Cpu } from "lucide-react";
 import { webLLMEngine } from "@/lib/ai/webllm-engine";
+import { modelManager } from "@/lib/ai/model-manager";
 import { canUseWebLLM } from "@/lib/ai/ai-service";
 import type { InitProgress } from "@/lib/ai/types";
 
@@ -26,13 +27,16 @@ export function ModelLoadProgress() {
   const [progress, setProgress] = useState<InitProgress | null>(null);
 
   useEffect(() => {
-    return webLLMEngine.subscribe((p) => {
-      if (p.progress >= 1) {
-        setProgress(null);
-      } else {
-        setProgress(p);
-      }
-    });
+    const onManager = (p: InitProgress) => {
+      if (p.progress >= 1) setProgress(null);
+      else setProgress(p);
+    };
+    const unsubEngine = webLLMEngine.subscribe(onManager);
+    const unsubManager = modelManager.subscribe(onManager);
+    return () => {
+      unsubEngine();
+      unsubManager();
+    };
   }, []);
 
   if (!progress) return null;

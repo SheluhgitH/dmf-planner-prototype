@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Card,
@@ -263,7 +264,10 @@ export default function AIToolsPage() {
         <p className="mt-1 text-zinc-400">
           {canUseWebLLM()
             ? "AI runs on your device (Phi-3.5 Mini) — prompts never leave your browser."
-            : "WebGPU not available. Using offline drafts. Use Chrome or Edge for on-device AI."}
+            : "WebGPU not available. Using offline drafts. Use Chrome or Edge for on-device AI."}{" "}
+          <Link href="/settings" className="text-violet-400 hover:text-violet-300">
+            Manage downloaded models
+          </Link>
         </p>
       </div>
 

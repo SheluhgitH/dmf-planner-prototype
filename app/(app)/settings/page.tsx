@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { InviteTeammatesCard } from "@/components/settings/invite-teammates-card";
+import { AiModelsCard } from "@/components/settings/ai-models-card";
 import { isSupabaseConfigured } from "@/lib/config";
 import {
   getWorkspace,
@@ -31,6 +32,8 @@ export default async function SettingsPage() {
 
       <div className="mx-auto max-w-2xl space-y-6">
         {live && <InviteTeammatesCard workspaceName={workspace.name} />}
+
+        <AiModelsCard />
 
         <Card>
           <CardHeader>

@@ -1,7 +1,8 @@
 "use client";
 
-import { CreateMLCEngine, type MLCEngine, type InitProgressReport } from "@mlc-ai/web-llm";
+import { modelManager } from "@/lib/ai/model-manager";
 import { modelIdForTier, type ModelTier } from "@/lib/ai/models";
+import { isTierEnabled } from "@/lib/ai/model-preferences";
 import type { InitProgress } from "@/lib/ai/types";
 
 type ProgressListener = (progress: InitProgress) => void;
@@ -12,58 +13,29 @@ export type CompleteOptions = {
 };
 
 class WebLLMEngine {
-  private engine: MLCEngine | null = null;
-  private loadedModelId: string | null = null;
-  private loadPromise: Promise<MLCEngine> | null = null;
   private listeners = new Set<ProgressListener>();
 
   subscribe(listener: ProgressListener): () => void {
+    const unsubManager = modelManager.subscribe(listener);
     this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  }
-
-  private emit(report: InitProgressReport) {
-    const progress: InitProgress = {
-      text: report.text,
-      progress: report.progress,
+    return () => {
+      unsubManager();
+      this.listeners.delete(listener);
     };
-    for (const listener of this.listeners) listener(progress);
   }
 
-  async ensureModel(tier: ModelTier): Promise<MLCEngine> {
+  getLoadedModelId(): string | null {
+    return modelManager.getLoadedModelId();
+  }
+
+  async ensureModel(tier: ModelTier) {
+    if (!isTierEnabled(tier)) {
+      throw new Error(
+        `The ${tier === "fast" ? "fast" : "quality"} AI model is disabled. Enable it in Settings → On-device AI models.`
+      );
+    }
     const modelId = modelIdForTier(tier);
-    if (this.engine && this.loadedModelId === modelId) {
-      return this.engine;
-    }
-
-    if (this.loadPromise && this.loadedModelId === modelId) {
-      return this.loadPromise;
-    }
-
-    this.loadPromise = (async () => {
-      if (this.engine && this.loadedModelId !== modelId) {
-        try {
-          await this.engine.unload();
-        } catch {
-          // ignore unload errors
-        }
-        this.engine = null;
-        this.loadedModelId = null;
-      }
-
-      const engine = await CreateMLCEngine(modelId, {
-        initProgressCallback: (report) => this.emit(report),
-      });
-      this.engine = engine;
-      this.loadedModelId = modelId;
-      return engine;
-    })();
-
-    try {
-      return await this.loadPromise;
-    } finally {
-      this.loadPromise = null;
-    }
+    return modelManager.acquireEngine(modelId);
   }
 
   async complete(
