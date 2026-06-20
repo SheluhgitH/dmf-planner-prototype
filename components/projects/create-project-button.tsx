@@ -11,6 +11,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { InlineError } from "@/components/ui/inline-error";
 import { createProjectAction } from "@/lib/actions/projects";
 
 export function CreateProjectButton() {
@@ -18,14 +19,23 @@ export function CreateProjectButton() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [createChannel, setCreateChannel] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const suggestedChannel = name
+    ? `project-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`
+    : "project-name";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const { project, error: err } = await createProjectAction(name, description);
+    const { project, error: err } = await createProjectAction(
+      name,
+      description,
+      createChannel
+    );
     setLoading(false);
     if (err) {
       setError(err);
@@ -65,7 +75,15 @@ export function CreateProjectButton() {
             rows={3}
             className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
           />
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          <label className="flex items-center gap-2 text-sm text-zinc-300">
+            <input
+              type="checkbox"
+              checked={createChannel}
+              onChange={(e) => setCreateChannel(e.target.checked)}
+            />
+            Create channel #{suggestedChannel}
+          </label>
+          {error && <InlineError message={error} />}
           <Button type="submit" disabled={loading || !name.trim()}>
             {loading ? "Creating..." : "Create"}
           </Button>

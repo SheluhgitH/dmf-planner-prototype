@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/data/supabase/server";
 import { SHARED_WORKSPACE_SLUG } from "@/lib/data/supabase/queries";
+import { logActivityEvent } from "@/lib/actions/activity";
+import { createChannelAction } from "@/lib/actions/channels";
 import type { Project, Task } from "@/lib/data/types";
 
 async function getWorkspaceId(supabase: Awaited<ReturnType<typeof createClient>>) {
@@ -31,7 +33,8 @@ async function getWorkspaceId(supabase: Awaited<ReturnType<typeof createClient>>
 
 export async function createProjectAction(
   name: string,
-  description: string
+  description: string,
+  createChannel = false
 ): Promise<{ project?: Project; error?: string }> {
   const supabase = await createClient();
   const ctx = await getWorkspaceId(supabase);
@@ -49,6 +52,17 @@ export async function createProjectAction(
     .single();
 
   if (error || !data) return { error: error?.message ?? "Failed to create project" };
+
+  if (createChannel) {
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    await createChannelAction(`project-${slug}`, "public");
+  }
+
+  await logActivityEvent({
+    type: "project_created",
+    title: `Created project: ${data.name}`,
+    link: `/projects/${data.id}`,
+  });
 
   revalidatePath("/projects");
   revalidatePath("/dashboard");
@@ -101,6 +115,14 @@ export async function createTaskAction(input: {
       link: `/projects/${data.project_id}`,
     });
   }
+
+  await logActivityEvent({
+    type: input.sourceMessageId ? "task_from_message" : "task_created",
+    title: input.sourceMessageId ? `Task from chat: ${data.title}` : `New task: ${data.title}`,
+    link: input.sourceChannelId
+      ? `/chat/${input.sourceChannelId}?messageId=${input.sourceMessageId}`
+      : `/projects/${data.project_id}`,
+  });
 
   revalidatePath(`/projects/${input.projectId}`);
   revalidatePath("/projects");
@@ -169,17 +191,41 @@ export async function deleteTaskAction(
   return {};
 }
 
+export async function createTasksBulkAction(input: {
+  projectId: string;
+  tasks: { title: string; dueDate?: string; assigneeId?: string }[];
+  channelId?: string;
+  messageId?: string;
+}): Promise<{ created: number; error?: string }> {
+  let created = 0;
+  for (const task of input.tasks) {
+    const { error } = await createTaskAction({
+      projectId: input.projectId,
+      title: task.title,
+      dueDate: task.dueDate,
+      assigneeId: task.assigneeId,
+      sourceMessageId: input.messageId,
+      sourceChannelId: input.channelId,
+    });
+    if (error) return { created, error };
+    created++;
+  }
+  return { created };
+}
+
 export async function createTaskFromMessageAction(input: {
   projectId: string;
   title: string;
   messageId: string;
   channelId: string;
   assigneeId?: string;
+  dueDate?: string;
 }): Promise<{ task?: Task; error?: string }> {
   return createTaskAction({
     projectId: input.projectId,
     title: input.title,
     assigneeId: input.assigneeId,
+    dueDate: input.dueDate,
     sourceMessageId: input.messageId,
     sourceChannelId: input.channelId,
   });

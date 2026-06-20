@@ -1,14 +1,25 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { isSupabaseConfigured } from "@/lib/config";
 import { createClient } from "@/lib/data/supabase/client";
 
 type UnreadContextValue = {
   unreadCounts: Record<string, number>;
+  clearUnread: (channelId: string) => void;
 };
 
-const UnreadContext = createContext<UnreadContextValue>({ unreadCounts: {} });
+const UnreadContext = createContext<UnreadContextValue>({
+  unreadCounts: {},
+  clearUnread: () => {},
+});
 
 export function UnreadProvider({
   initialCounts,
@@ -28,6 +39,15 @@ export function UnreadProvider({
   useEffect(() => {
     setUnreadCounts(initialCounts);
   }, [initialCounts]);
+
+  const clearUnread = useCallback((channelId: string) => {
+    setUnreadCounts((prev) => {
+      if (!prev[channelId]) return prev;
+      const next = { ...prev };
+      delete next[channelId];
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (!isSupabaseConfigured() || !userId) return;
@@ -55,10 +75,13 @@ export function UnreadProvider({
     };
   }, [workspaceId, userId, channelIds]);
 
+  const value = useMemo(
+    () => ({ unreadCounts, clearUnread }),
+    [unreadCounts, clearUnread]
+  );
+
   return (
-    <UnreadContext.Provider value={{ unreadCounts }}>
-      {children}
-    </UnreadContext.Provider>
+    <UnreadContext.Provider value={value}>{children}</UnreadContext.Provider>
   );
 }
 
@@ -66,12 +89,6 @@ export function useUnreadCounts() {
   return useContext(UnreadContext).unreadCounts;
 }
 
-export function useClearUnread(channelId: string) {
-  const [, setCounts] = useState<Record<string, number>>({});
-  return () => {
-    setCounts((prev) => {
-      const next = { ...prev, [channelId]: 0 };
-      return next;
-    });
-  };
+export function useClearUnread() {
+  return useContext(UnreadContext).clearUnread;
 }

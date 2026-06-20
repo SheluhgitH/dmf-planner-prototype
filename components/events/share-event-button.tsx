@@ -11,6 +11,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { InlineError } from "@/components/ui/inline-error";
 import { shareEventToChannelAction } from "@/lib/actions/events-ext";
 import type { Channel } from "@/lib/data/types";
 
@@ -23,14 +24,18 @@ export function ShareEventButton({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const publicChannels = channels.filter((c) => !c.isDm);
 
   async function share(channelId: string) {
-    const { error } = await shareEventToChannelAction(eventId, channelId);
-    if (!error) {
-      setOpen(false);
-      router.refresh();
+    setError(null);
+    const { error: err } = await shareEventToChannelAction(eventId, channelId);
+    if (err) {
+      setError(err);
+      return;
     }
+    setOpen(false);
+    router.refresh();
   }
 
   return (
@@ -45,6 +50,7 @@ export function ShareEventButton({
         <DialogHeader>
           <DialogTitle>Share to channel</DialogTitle>
         </DialogHeader>
+        {error && <InlineError message={error} />}
         <ul className="space-y-1">
           {publicChannels.map((c) => (
             <li key={c.id}>

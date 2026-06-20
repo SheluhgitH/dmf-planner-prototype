@@ -20,12 +20,14 @@ import {
   sendMessageAction,
   uploadChatAttachmentAction,
 } from "@/lib/actions/chat";
+import { cn } from "@/lib/utils";
 import {
   loadCachedMessages,
   mergeMessageLists,
   saveCachedMessages,
 } from "@/lib/chat/message-cache";
 import type { Message, MessageReaction, Project, User } from "@/lib/data/types";
+import { useClearUnread } from "@/components/layout/unread-provider";
 
 const MESSAGE_PAGE_SIZE = 50;
 const INITIAL_MESSAGE_LIMIT = 100;
@@ -63,6 +65,9 @@ export function ChatView({
   initialMessages,
   currentUser,
   projects = [],
+  members = [],
+  linkedTasks = {},
+  highlightMessageId,
 }: {
   channelId: string;
   channelName: string;
@@ -70,7 +75,11 @@ export function ChatView({
   initialMessages: Message[];
   currentUser: User;
   projects?: Project[];
+  members?: User[];
+  linkedTasks?: Record<string, { id: string; title: string; projectId: string }>;
+  highlightMessageId?: string;
 }) {
+  const clearUnread = useClearUnread();
   const [messages, setMessages] = useState<Message[]>(() =>
     mergeMessageLists(loadCachedMessages(channelId), initialMessages)
   );
@@ -209,8 +218,15 @@ export function ChatView({
 
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
-    markChannelReadAction(channelId);
-  }, [channelId]);
+    void markChannelReadAction(channelId);
+    clearUnread(channelId);
+  }, [channelId, clearUnread]);
+
+  useEffect(() => {
+    if (!highlightMessageId) return;
+    const el = document.getElementById(`message-${highlightMessageId}`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [highlightMessageId, messages]);
 
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
@@ -597,7 +613,7 @@ export function ChatView({
 
   return (
     <div className="flex min-h-0 flex-1">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", threadParent && "hidden lg:flex")}>
         <div className="shrink-0 border-b border-zinc-800 px-6 py-4">
           <div className="flex items-center justify-between gap-4">
             <h1 className="flex items-center gap-2 text-lg font-semibold text-zinc-100">
@@ -661,7 +677,11 @@ export function ChatView({
                   message={msg}
                   currentUser={currentUser}
                   channelId={channelId}
+                  channelName={channelName}
                   projects={projects}
+                  members={members}
+                  linkedTask={linkedTasks[msg.id]}
+                  highlight={msg.id === highlightMessageId}
                   onReply={(m) => setReplyTo(m)}
                   onThread={openThread}
                   onToggleReaction={handleToggleReaction}
@@ -679,6 +699,7 @@ export function ChatView({
         <div className="shrink-0">
           <MessageComposer
           channelName={channelName}
+          members={members}
           uploadError={uploadError}
           replyTo={
             replyTo
@@ -702,6 +723,10 @@ export function ChatView({
           replies={threadReplies}
           currentUser={currentUser}
           channelName={channelName}
+          channelId={channelId}
+          projects={projects}
+          linkedTasks={linkedTasks}
+          members={members}
           onClose={() => {
             setThreadParent(null);
             setThreadReplies([]);

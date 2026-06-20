@@ -29,7 +29,7 @@ const navItems = [
   { href: "/chat/general", label: "Chat", icon: Hash },
   { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/events", label: "Events", icon: Calendar },
-  { href: "/ai", label: "AI Tools", icon: Bot },
+  { href: "/ai", label: "Draft Generator", icon: Bot },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

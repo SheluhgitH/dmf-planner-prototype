@@ -1,12 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { MessageSquare, CheckSquare, Pencil, Trash2, MessagesSquare } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { MessageSquare, CheckSquare, Pencil, Trash2, MessagesSquare, Calendar, Sparkles } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { MessageIntentChips } from "@/components/ai/message-intent-chips";
+import { ThreadSummarizeDialog } from "@/components/ai/thread-summarize-dialog";
 import { ReactionPicker } from "@/components/chat/reaction-picker";
 import { FilePreview } from "@/components/chat/file-preview";
+import { MessageBody } from "@/components/chat/message-body";
 import { CreateTaskFromMessageDialog } from "@/components/chat/create-task-from-message-dialog";
+import { ScheduleEventFromMessageDialog } from "@/components/chat/schedule-event-from-message-dialog";
 import type { Message, Project, User } from "@/lib/data/types";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
@@ -14,7 +20,11 @@ export function MessageBubble({
   message,
   currentUser,
   channelId,
+  channelName = "channel",
   projects = [],
+  members = [],
+  linkedTask,
+  highlight = false,
   onReply,
   onThread,
   onToggleReaction,
@@ -24,21 +34,35 @@ export function MessageBubble({
   message: Message;
   currentUser: User;
   channelId?: string;
+  channelName?: string;
   projects?: Project[];
+  members?: User[];
+  linkedTask?: { id: string; title: string; projectId: string };
+  highlight?: boolean;
   onReply?: (message: Message) => void;
   onThread?: (message: Message) => void;
   onToggleReaction?: (messageId: string, emoji: string, reactedByMe: boolean) => void;
   onEdit?: (messageId: string, body: string) => Promise<void>;
   onDelete?: (messageId: string) => Promise<void>;
 }) {
+  const router = useRouter();
   const [showPicker, setShowPicker] = useState(false);
   const [showTaskDialog, setShowTaskDialog] = useState(false);
+  const [showEventDialog, setShowEventDialog] = useState(false);
+  const [showSummaryDialog, setShowSummaryDialog] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editBody, setEditBody] = useState(message.body);
   const isOwn = message.authorId === currentUser.id;
 
   return (
-    <div className={cn("group flex gap-3", isOwn && "flex-row-reverse")}>
+    <div
+      id={highlight ? `message-${message.id}` : undefined}
+      className={cn(
+        "group flex gap-3",
+        isOwn && "flex-row-reverse",
+        highlight && "rounded-lg ring-2 ring-violet-500/50"
+      )}
+    >
       <Avatar name={message.author?.displayName ?? "?"} />
       <div className={cn("max-w-[70%]", isOwn && "text-right")}>
         <div
@@ -56,7 +80,7 @@ export function MessageBubble({
         </div>
 
         {message.body.trim() && !editing && (
-          <p
+          <div
             className={cn(
               "mt-1 rounded-lg px-3 py-2 text-sm",
               isOwn
@@ -64,8 +88,27 @@ export function MessageBubble({
                 : "bg-zinc-800 text-zinc-200"
             )}
           >
-            {message.body}
-          </p>
+            <MessageBody body={message.body} />
+          </div>
+        )}
+        {message.body.trim() && channelId && (
+          <MessageIntentChips
+            body={message.body}
+            onTask={() => setShowTaskDialog(true)}
+            onEvent={() => setShowEventDialog(true)}
+            onScript={() => router.push("/ai")}
+          />
+        )}
+        {linkedTask && (
+          <Link
+            href={`/projects/${linkedTask.projectId}`}
+            className={cn(
+              "mt-1 inline-block rounded-full border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-xs text-violet-300",
+              isOwn && "float-right clear-both"
+            )}
+          >
+            Linked task: {linkedTask.title}
+          </Link>
         )}
         {editing && (
           <form
@@ -174,17 +217,41 @@ export function MessageBubble({
               )}
             </Button>
           )}
-          {channelId && message.body.trim() && (
+          {channelId && (message.replyCount ?? 0) > 0 && !message.parentMessageId && (
             <Button
               variant="ghost"
               size="sm"
               type="button"
               className="h-7 gap-1 px-2 text-xs text-zinc-500"
-              onClick={() => setShowTaskDialog(true)}
+              onClick={() => setShowSummaryDialog(true)}
             >
-              <CheckSquare className="h-3 w-3" />
-              Task
+              <Sparkles className="h-3 w-3" />
+              Summarize
             </Button>
+          )}
+          {channelId && message.body.trim() && (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                className="h-7 gap-1 px-2 text-xs text-zinc-500"
+                onClick={() => setShowTaskDialog(true)}
+              >
+                <CheckSquare className="h-3 w-3" />
+                Task
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                className="h-7 gap-1 px-2 text-xs text-zinc-500"
+                onClick={() => setShowEventDialog(true)}
+              >
+                <Calendar className="h-3 w-3" />
+                Schedule
+              </Button>
+            </>
           )}
           {isOwn && onEdit && (
             <Button
@@ -213,13 +280,28 @@ export function MessageBubble({
           )}
         </div>
         {channelId && (
-          <CreateTaskFromMessageDialog
-            message={message}
-            channelId={channelId}
-            projects={projects}
-            open={showTaskDialog}
-            onOpenChange={setShowTaskDialog}
-          />
+          <>
+            <CreateTaskFromMessageDialog
+              message={message}
+              channelId={channelId}
+              channelName={channelName}
+              projects={projects}
+              members={members}
+              open={showTaskDialog}
+              onOpenChange={setShowTaskDialog}
+            />
+            <ScheduleEventFromMessageDialog
+              messageBody={message.body}
+              open={showEventDialog}
+              onOpenChange={setShowEventDialog}
+            />
+            <ThreadSummarizeDialog
+              channelId={channelId}
+              parentMessageId={message.id}
+              open={showSummaryDialog}
+              onOpenChange={setShowSummaryDialog}
+            />
+          </>
         )}
       </div>
     </div>

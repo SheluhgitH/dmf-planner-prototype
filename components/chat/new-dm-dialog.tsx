@@ -11,6 +11,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { InlineError } from "@/components/ui/inline-error";
 import { getOrCreateDmChannelAction } from "@/lib/actions/channels";
 import type { User } from "@/lib/data/types";
 
@@ -24,17 +25,19 @@ export function NewDmDialog({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function startDm(userId: string) {
     setLoading(userId);
-    const { channel, error } = await getOrCreateDmChannelAction(userId);
+    setError(null);
+    const { channel, error: err } = await getOrCreateDmChannelAction(userId);
     setLoading(null);
     if (channel) {
       setOpen(false);
       router.push(`/chat/${channel.id}`);
       router.refresh();
-    } else if (error) {
-      alert(error);
+    } else if (err) {
+      setError(err);
     }
   }
 
@@ -55,6 +58,7 @@ export function NewDmDialog({
         <DialogHeader>
           <DialogTitle>Start a direct message</DialogTitle>
         </DialogHeader>
+        {error && <InlineError message={error} />}
         <ul className="space-y-1">
           {others.map((m) => (
             <li key={m.id}>

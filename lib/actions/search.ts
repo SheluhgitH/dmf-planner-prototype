@@ -151,7 +151,7 @@ export async function searchWorkspaceAction(
       id: m.id,
       title: m.body.slice(0, 80),
       subtitle: m.channel_id,
-      link: `/chat/${m.channel_id}`,
+      link: `/chat/${m.channel_id}?messageId=${m.id}`,
     });
   }
 

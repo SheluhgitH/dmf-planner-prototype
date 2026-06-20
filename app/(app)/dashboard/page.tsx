@@ -1,3 +1,5 @@
+import { ActivityFeed } from "@/components/dashboard/activity-feed";
+import { StudioDigestCard } from "@/components/dashboard/studio-digest";
 import Link from "next/link";
 import {
   Card,
@@ -10,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getDashboardData } from "@/lib/data/provider";
 import { formatRelativeTime } from "@/lib/utils";
-import { Calendar, CheckSquare, FolderKanban, MessageSquare, Bell } from "lucide-react";
+import { Calendar, CheckSquare, FolderKanban, MessageSquare, Bell, Activity, Sparkles } from "lucide-react";
 
 export default async function DashboardPage() {
   const data = await getDashboardData();
@@ -153,7 +155,7 @@ export default async function DashboardPage() {
               {data.recentMessages.slice(0, 5).map((msg) => (
                 <li key={msg.id}>
                   <Link
-                    href={`/chat/${msg.channelId}`}
+                    href={`/chat/${msg.channelId}?messageId=${msg.id}`}
                     className="block rounded-lg bg-zinc-800/50 px-3 py-2 transition-colors hover:bg-zinc-800"
                   >
                     <div className="flex items-center justify-between">
@@ -208,6 +210,32 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-violet-400" />
+            Studio Digest
+          </CardTitle>
+          <CardDescription>AI summary of what needs your attention</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <StudioDigestCard />
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="h-5 w-5 text-violet-400" />
+            Workspace Activity
+          </CardTitle>
+          <CardDescription>Recent updates across chat, tasks, and events</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ActivityFeed />
+        </CardContent>
+      </Card>
     </div>
   );
 }

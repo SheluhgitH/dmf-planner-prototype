@@ -11,6 +11,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { InlineError } from "@/components/ui/inline-error";
 import { createChannelAction } from "@/lib/actions/channels";
 
 export function CreateChannelButton() {
@@ -19,19 +20,21 @@ export function CreateChannelButton() {
   const [name, setName] = useState("");
   const [type, setType] = useState<"public" | "private">("public");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    const { channel, error } = await createChannelAction(name, type);
+    setError(null);
+    const { channel, error: err } = await createChannelAction(name, type);
     setLoading(false);
     if (channel) {
       setOpen(false);
       setName("");
       router.push(`/chat/${channel.id}`);
       router.refresh();
-    } else if (error) {
-      alert(error);
+    } else if (err) {
+      setError(err);
     }
   }
 
@@ -69,6 +72,7 @@ export function CreateChannelButton() {
           <Button type="submit" disabled={loading || !name.trim()}>
             Create
           </Button>
+          {error && <InlineError message={error} />}
         </form>
       </DialogContent>
     </Dialog>

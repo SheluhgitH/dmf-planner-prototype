@@ -271,7 +271,7 @@ async function getSignedUrls(
     paths.map(async (path) => {
       const { data } = await supabase.storage
         .from("chat-attachments")
-        .createSignedUrl(path, 3600);
+        .createSignedUrl(path, 86400);
       if (data?.signedUrl) urls[path] = data.signedUrl;
     })
   );
@@ -448,7 +448,7 @@ export async function getMessageAttachmentUrl(
   const supabase = await createClient();
   const { data } = await supabase.storage
     .from("chat-attachments")
-    .createSignedUrl(storagePath, 3600);
+    .createSignedUrl(storagePath, 86400);
   return data?.signedUrl ?? null;
 }
 
@@ -501,7 +501,7 @@ export async function sendMessage(
             type: "mention",
             title: `${currentUser?.displayName ?? "Someone"} mentioned you`,
             body: body.slice(0, 120),
-            link: `/chat/${channelId}`,
+            link: `/chat/${channelId}?messageId=${data.id}`,
           });
         }
       }
@@ -521,7 +521,7 @@ export async function sendMessage(
         type: "thread_reply",
         title: `${currentUser?.displayName ?? "Someone"} replied in a thread`,
         body: body.slice(0, 120),
-        link: `/chat/${channelId}`,
+        link: `/chat/${channelId}?messageId=${data.id}`,
       });
     }
   }

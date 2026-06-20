@@ -6,16 +6,21 @@ import {
   getMessages,
   getProjects,
   getWorkspace,
+  getWorkspaceMembers,
 } from "@/lib/data/provider";
+import { getLinkedTasksForChannelAction } from "@/lib/actions/profile";
 
 export const dynamic = "force-dynamic";
 
 export default async function ChannelPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ channelId: string }>;
+  searchParams: Promise<{ messageId?: string }>;
 }) {
   const { channelId } = await params;
+  const { messageId } = await searchParams;
 
   if (isSupabaseConfigured()) {
     const { joinSharedWorkspace } = await import(
@@ -24,13 +29,19 @@ export default async function ChannelPage({
     await joinSharedWorkspace();
   }
 
-  const [channels, messages, user, workspace, projects] = await Promise.all([
-    getChannels(),
-    getMessages(channelId, { limit: 100 }),
-    getCurrentUser(),
-    getWorkspace(),
-    getProjects(),
-  ]);
+  const [channels, messages, user, workspace, projects, members] =
+    await Promise.all([
+      getChannels(),
+      getMessages(channelId, { limit: 100 }),
+      getCurrentUser(),
+      getWorkspace(),
+      getProjects(),
+      getWorkspaceMembers(),
+    ]);
+
+  const { linkedTasks } = isSupabaseConfigured()
+    ? await getLinkedTasksForChannelAction(channelId)
+    : { linkedTasks: {} };
 
   const channel = channels.find((c) => c.id === channelId);
   const channelName = channel?.name ?? channelId;
@@ -44,6 +55,9 @@ export default async function ChannelPage({
         initialMessages={messages}
         currentUser={user ?? { id: "guest", email: "", displayName: "Guest" }}
         projects={projects}
+        members={members.map((m) => m.user)}
+        linkedTasks={linkedTasks}
+        highlightMessageId={messageId}
       />
     </div>
   );

@@ -62,7 +62,7 @@ export async function uploadChatAttachmentAction(
 
   const { data: signed } = await supabase.storage
     .from("chat-attachments")
-    .createSignedUrl(storagePath, 3600);
+    .createSignedUrl(storagePath, 86400);
 
   return {
     attachment: {

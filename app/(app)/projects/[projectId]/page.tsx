@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { KanbanBoard } from "@/components/projects/kanban-board";
 import { AddTaskButton } from "@/components/projects/add-task-button";
-import { getProject } from "@/lib/data/provider";
+import { getProject, getWorkspaceMembers } from "@/lib/data/provider";
 import { ArrowLeft } from "lucide-react";
 
 export default async function ProjectDetailPage({
@@ -13,7 +13,10 @@ export default async function ProjectDetailPage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
-  const project = await getProject(projectId);
+  const [project, members] = await Promise.all([
+    getProject(projectId),
+    getWorkspaceMembers(),
+  ]);
   if (!project) notFound();
 
   return (
@@ -32,7 +35,10 @@ export default async function ProjectDetailPage({
               {project.status}
             </Badge>
           </div>
-          <AddTaskButton projectId={project.id} />
+          <AddTaskButton
+            projectId={project.id}
+            members={members.map((m) => m.user)}
+          />
         </div>
         <p className="mt-1 text-zinc-400">{project.description}</p>
       </div>

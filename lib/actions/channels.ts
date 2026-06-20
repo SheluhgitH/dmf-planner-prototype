@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/data/supabase/server";
 import { SHARED_WORKSPACE_SLUG } from "@/lib/data/supabase/queries";
+import { logActivityEvent } from "@/lib/actions/activity";
 import type { Channel } from "@/lib/data/types";
 
 function dmChannelId(userA: string, userB: string) {
@@ -127,6 +128,12 @@ export async function createChannelAction(
       user_id: user.id,
     });
   }
+
+  await logActivityEvent({
+    type: "channel_created",
+    title: `Created channel #${channel.name}`,
+    link: `/chat/${channelId}`,
+  });
 
   revalidatePath("/chat");
   return {

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/data/supabase/server";
+import { logActivityEvent } from "@/lib/actions/activity";
 
 export async function updateEventRsvpAction(
   eventId: string,
@@ -22,6 +23,19 @@ export async function updateEventRsvpAction(
   );
 
   if (error) return { error: error.message };
+
+  const { data: event } = await supabase
+    .from("events")
+    .select("title")
+    .eq("id", eventId)
+    .maybeSingle();
+
+  await logActivityEvent({
+    type: "event_rsvp",
+    title: `RSVP ${status.replace("_", " ")}: ${event?.title ?? "Event"}`,
+    link: "/events",
+  });
+
   revalidatePath("/events");
   revalidatePath("/dashboard");
   return {};
@@ -59,6 +73,13 @@ export async function shareEventToChannelAction(
   });
 
   if (error) return { error: error.message };
+
+  await logActivityEvent({
+    type: "event_shared",
+    title: `Shared event to channel: ${event.title}`,
+    link: `/chat/${channelId}`,
+  });
+
   revalidatePath(`/chat/${channelId}`);
   return {};
 }

@@ -8,7 +8,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { InviteTeammatesCard } from "@/components/settings/invite-teammates-card";
+import { isSupabaseConfigured } from "@/lib/config";
 import {
   getWorkspace,
   getWorkspaceMembers,
@@ -19,6 +20,7 @@ export default async function SettingsPage() {
     getWorkspace(),
     getWorkspaceMembers(),
   ]);
+  const live = isSupabaseConfigured();
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
@@ -28,6 +30,8 @@ export default async function SettingsPage() {
       </div>
 
       <div className="mx-auto max-w-2xl space-y-6">
+        {live && <InviteTeammatesCard workspaceName={workspace.name} />}
+
         <Card>
           <CardHeader>
             <CardTitle>Workspace</CardTitle>
@@ -44,9 +48,11 @@ export default async function SettingsPage() {
               <label className="mb-1.5 block text-sm text-zinc-400">Slug</label>
               <Input defaultValue={workspace.slug} readOnly />
             </div>
-            <Button variant="secondary" disabled>
-              Save changes (coming with live backend)
-            </Button>
+            {!live && (
+              <p className="text-sm text-zinc-500">
+                Connect Supabase to enable workspace editing and invites.
+              </p>
+            )}
           </CardContent>
         </Card>
 

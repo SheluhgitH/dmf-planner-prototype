@@ -23,6 +23,17 @@ export default async function ProjectsPage() {
         <CreateProjectButton />
       </div>
 
+      {projects.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-zinc-700 bg-zinc-900/30 px-6 py-16 text-center">
+          <h2 className="text-lg font-semibold text-zinc-200">No projects yet</h2>
+          <p className="mt-2 max-w-sm text-sm text-zinc-500">
+            Create your first project to track scripts, shoots, and deadlines on a Kanban board.
+          </p>
+          <div className="mt-6">
+            <CreateProjectButton />
+          </div>
+        </div>
+      ) : (
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {projects.map((project) => {
           const done = project.tasks.filter((t) => t.status === "done").length;
@@ -52,6 +63,7 @@ export default async function ProjectsPage() {
           );
         })}
       </div>
+      )}
     </div>
   );
 }
