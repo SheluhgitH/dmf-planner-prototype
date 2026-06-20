@@ -98,6 +98,24 @@ export async function getWorkspaceMembers(
   });
 }
 
+function mapChannelRows(
+  data: {
+    id: string;
+    workspace_id: string;
+    name: string;
+    type: string;
+    is_dm: boolean;
+  }[]
+): Channel[] {
+  return data.map((c) => ({
+    id: c.id,
+    workspaceId: c.workspace_id,
+    name: c.name,
+    type: c.type as Channel["type"],
+    isDm: c.is_dm,
+  }));
+}
+
 export async function getChannels(workspaceId: string): Promise<Channel[]> {
   const supabase = await createClient();
   const { data } = await supabase
@@ -105,13 +123,25 @@ export async function getChannels(workspaceId: string): Promise<Channel[]> {
     .select("id, workspace_id, name, type, is_dm")
     .eq("workspace_id", workspaceId)
     .order("name");
-  return (data ?? []).map((c) => ({
-    id: c.id,
-    workspaceId: c.workspace_id,
-    name: c.name,
-    type: c.type,
-    isDm: c.is_dm,
-  }));
+
+  if (data?.length) return mapChannelRows(data);
+
+  const { data: general } = await supabase
+    .from("channels")
+    .select("workspace_id")
+    .eq("id", "general")
+    .maybeSingle();
+
+  if (general?.workspace_id && general.workspace_id !== workspaceId) {
+    const { data: fallback } = await supabase
+      .from("channels")
+      .select("id, workspace_id, name, type, is_dm")
+      .eq("workspace_id", general.workspace_id)
+      .order("name");
+    return mapChannelRows(fallback ?? []);
+  }
+
+  return [];
 }
 
 type MessageRow = {
@@ -332,12 +362,12 @@ export async function sendMessage(
   channelId: string,
   body: string,
   parentMessageId?: string
-): Promise<Message | null> {
+): Promise<{ message?: Message; error?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return null;
+  if (!user) return { error: "Not authenticated" };
 
   const { data, error } = await supabase
     .from("messages")
@@ -350,16 +380,20 @@ export async function sendMessage(
     .select("id, channel_id, author_id, body, parent_message_id, created_at")
     .single();
 
-  if (error || !data) return null;
+  if (error) return { error: error.message };
+  if (!data) return { error: "Failed to send message" };
+
   const currentUser = await getCurrentUser();
   return {
-    id: data.id,
-    channelId: data.channel_id,
-    authorId: data.author_id,
-    body: data.body,
-    createdAt: data.created_at,
-    parentMessageId: data.parent_message_id ?? undefined,
-    author: currentUser ?? undefined,
+    message: {
+      id: data.id,
+      channelId: data.channel_id,
+      authorId: data.author_id,
+      body: data.body,
+      createdAt: data.created_at,
+      parentMessageId: data.parent_message_id ?? undefined,
+      author: currentUser ?? undefined,
+    },
   };
 }
 

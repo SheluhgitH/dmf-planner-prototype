@@ -45,7 +45,9 @@ function mergeReaction(
 
 function mergeMessages(local: Message[], server: Message[]): Message[] {
   const localById = new Map(local.map((m) => [m.id, m]));
-  return server.map((serverMsg) => {
+  const serverIds = new Set(server.map((m) => m.id));
+
+  const merged = server.map((serverMsg) => {
     const localMsg = localById.get(serverMsg.id);
     if (!localMsg?.attachments?.length) return serverMsg;
     const serverAttCount = serverMsg.attachments?.length ?? 0;
@@ -55,6 +57,12 @@ function mergeMessages(local: Message[], server: Message[]): Message[] {
     }
     return serverMsg;
   });
+
+  const localOnly = local.filter((m) => !serverIds.has(m.id));
+  return [...merged, ...localOnly].sort(
+    (a, b) =>
+      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
 }
 
 export function ChatView({

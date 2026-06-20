@@ -1,10 +1,7 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/data/supabase/server";
-import {
-  sendMessage,
-} from "@/lib/data/supabase/queries";
+import { sendMessage } from "@/lib/data/supabase/queries";
 import type { Message, MessageAttachment } from "@/lib/data/types";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -14,7 +11,12 @@ export async function sendMessageAction(
   body: string,
   parentMessageId?: string
 ): Promise<{ message?: Message; error?: string }> {
-  const message = await sendMessage(channelId, body.trim(), parentMessageId);
+  const { message, error } = await sendMessage(
+    channelId,
+    body.trim(),
+    parentMessageId
+  );
+  if (error) return { error };
   if (!message) return { error: "Failed to send message" };
 
   return { message };
@@ -92,7 +94,6 @@ export async function addReactionAction(
   });
 
   if (error) return { error: error.message };
-  revalidatePath(`/chat/${channelId}`);
   return {};
 }
 
@@ -115,7 +116,6 @@ export async function removeReactionAction(
     .eq("emoji", emoji);
 
   if (error) return { error: error.message };
-  revalidatePath(`/chat/${channelId}`);
   return {};
 }
 
@@ -138,7 +138,6 @@ export async function markChannelReadAction(
   );
 
   if (error) return { error: error.message };
-  revalidatePath("/chat");
   return {};
 }
 
