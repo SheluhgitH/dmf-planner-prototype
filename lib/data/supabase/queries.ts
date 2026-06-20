@@ -3,6 +3,8 @@ import type {
   Channel,
   DashboardData,
   Message,
+  MessageAttachment,
+  MessageReaction,
   PlannerEvent,
   Project,
   User,
@@ -88,41 +90,224 @@ export async function getChannels(workspaceId: string): Promise<Channel[]> {
   }));
 }
 
-export async function getMessages(channelId: string): Promise<Message[]> {
+type MessageRow = {
+  id: string;
+  channel_id: string;
+  author_id: string;
+  body: string;
+  parent_message_id: string | null;
+  created_at: string;
+  profiles: { display_name: string; avatar_url: string | null } | { display_name: string; avatar_url: string | null }[] | null;
+  message_attachments?: {
+    id: string;
+    storage_path: string;
+    file_name: string;
+    mime_type: string | null;
+    file_size: number | null;
+  }[];
+  message_reactions?: { emoji: string; user_id: string }[];
+};
+
+function getProfile(raw: MessageRow["profiles"]) {
+  return (Array.isArray(raw) ? raw[0] : raw) as {
+    display_name: string;
+    avatar_url: string | null;
+  } | null;
+}
+
+function aggregateReactions(
+  reactions: { emoji: string; user_id: string }[] | undefined,
+  currentUserId?: string
+): MessageReaction[] {
+  if (!reactions?.length) return [];
+  const map = new Map<string, { count: number; reactedByMe: boolean }>();
+  for (const r of reactions) {
+    const existing = map.get(r.emoji) ?? { count: 0, reactedByMe: false };
+    existing.count += 1;
+    if (currentUserId && r.user_id === currentUserId) existing.reactedByMe = true;
+    map.set(r.emoji, existing);
+  }
+  return Array.from(map.entries()).map(([emoji, data]) => ({
+    emoji,
+    count: data.count,
+    reactedByMe: data.reactedByMe,
+  }));
+}
+
+async function mapMessageRow(
+  m: MessageRow,
+  replyCounts: Record<string, number>,
+  currentUserId?: string,
+  signedUrls?: Record<string, string>
+): Promise<Message> {
+  const profile = getProfile(m.profiles);
+  const attachments: MessageAttachment[] = (m.message_attachments ?? []).map(
+    (a) => ({
+      id: a.id,
+      fileName: a.file_name,
+      mimeType: a.mime_type ?? undefined,
+      fileSize: a.file_size ?? undefined,
+      storagePath: a.storage_path,
+      url: signedUrls?.[a.storage_path],
+    })
+  );
+
+  return {
+    id: m.id,
+    channelId: m.channel_id,
+    authorId: m.author_id,
+    body: m.body,
+    createdAt: m.created_at,
+    parentMessageId: m.parent_message_id ?? undefined,
+    replyCount: replyCounts[m.id] ?? 0,
+    attachments,
+    reactions: aggregateReactions(m.message_reactions, currentUserId),
+    author: {
+      id: m.author_id,
+      email: "",
+      displayName: profile?.display_name ?? "Member",
+      avatarUrl: profile?.avatar_url ?? undefined,
+    },
+  };
+}
+
+async function getSignedUrls(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  paths: string[]
+): Promise<Record<string, string>> {
+  const urls: Record<string, string> = {};
+  await Promise.all(
+    paths.map(async (path) => {
+      const { data } = await supabase.storage
+        .from("chat-attachments")
+        .createSignedUrl(path, 3600);
+      if (data?.signedUrl) urls[path] = data.signedUrl;
+    })
+  );
+  return urls;
+}
+
+export async function getMessages(
+  channelId: string,
+  options?: { parentId?: string | null; limit?: number }
+): Promise<Message[]> {
   const supabase = await createClient();
-  const { data } = await supabase
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  let query = supabase
     .from("messages")
     .select(
-      "id, channel_id, author_id, body, created_at, profiles(display_name, avatar_url)"
+      `id, channel_id, author_id, body, parent_message_id, created_at,
+       profiles(display_name, avatar_url),
+       message_attachments(id, storage_path, file_name, mime_type, file_size),
+       message_reactions(emoji, user_id)`
     )
     .eq("channel_id", channelId)
     .order("created_at", { ascending: true });
 
-  return (data ?? []).map((m) => {
-    const raw = m.profiles;
-    const profile = (Array.isArray(raw) ? raw[0] : raw) as {
-      display_name: string;
-      avatar_url: string | null;
-    } | null;
-    return {
-      id: m.id,
-      channelId: m.channel_id,
-      authorId: m.author_id,
-      body: m.body,
-      createdAt: m.created_at,
-      author: {
-        id: m.author_id,
-        email: "",
-        displayName: profile?.display_name ?? "Member",
-        avatarUrl: profile?.avatar_url ?? undefined,
-      },
-    };
-  });
+  if (options?.parentId === undefined) {
+    query = query.is("parent_message_id", null);
+  } else if (options.parentId) {
+    query = query.eq("parent_message_id", options.parentId);
+  }
+
+  if (options?.limit) {
+    query = query.limit(options.limit);
+  }
+
+  const { data } = await query;
+  const rows = (data ?? []) as MessageRow[];
+
+  const { data: replyData } = await supabase
+    .from("messages")
+    .select("parent_message_id")
+    .eq("channel_id", channelId)
+    .not("parent_message_id", "is", null);
+
+  const replyCounts: Record<string, number> = {};
+  for (const r of replyData ?? []) {
+    if (r.parent_message_id) {
+      replyCounts[r.parent_message_id] =
+        (replyCounts[r.parent_message_id] ?? 0) + 1;
+    }
+  }
+
+  const allPaths = rows.flatMap((m) =>
+    (m.message_attachments ?? []).map((a) => a.storage_path)
+  );
+  const signedUrls = await getSignedUrls(supabase, allPaths);
+
+  return Promise.all(
+    rows.map((m) => mapMessageRow(m, replyCounts, user?.id, signedUrls))
+  );
+}
+
+export async function getThreadReplies(
+  parentMessageId: string
+): Promise<Message[]> {
+  const supabase = await createClient();
+  const { data: parent } = await supabase
+    .from("messages")
+    .select("channel_id")
+    .eq("id", parentMessageId)
+    .single();
+
+  if (!parent) return [];
+  return getMessages(parent.channel_id, { parentId: parentMessageId });
+}
+
+export async function getChannelUnreadCounts(
+  userId: string,
+  workspaceId: string
+): Promise<Record<string, number>> {
+  const supabase = await createClient();
+  const channels = await getChannels(workspaceId);
+  const counts: Record<string, number> = {};
+
+  const { data: reads } = await supabase
+    .from("channel_reads")
+    .select("channel_id, last_read_at")
+    .eq("user_id", userId);
+
+  const readMap = new Map(
+    (reads ?? []).map((r) => [r.channel_id, r.last_read_at])
+  );
+
+  for (const channel of channels) {
+    const lastRead = readMap.get(channel.id);
+    let query = supabase
+      .from("messages")
+      .select("id", { count: "exact", head: true })
+      .eq("channel_id", channel.id)
+      .neq("author_id", userId);
+
+    if (lastRead) {
+      query = query.gt("created_at", lastRead);
+    }
+
+    const { count } = await query;
+    if (count && count > 0) counts[channel.id] = count;
+  }
+
+  return counts;
+}
+
+export async function getMessageAttachmentUrl(
+  storagePath: string
+): Promise<string | null> {
+  const supabase = await createClient();
+  const { data } = await supabase.storage
+    .from("chat-attachments")
+    .createSignedUrl(storagePath, 3600);
+  return data?.signedUrl ?? null;
 }
 
 export async function sendMessage(
   channelId: string,
-  body: string
+  body: string,
+  parentMessageId?: string
 ): Promise<Message | null> {
   const supabase = await createClient();
   const {
@@ -132,8 +317,13 @@ export async function sendMessage(
 
   const { data, error } = await supabase
     .from("messages")
-    .insert({ channel_id: channelId, author_id: user.id, body })
-    .select("id, channel_id, author_id, body, created_at")
+    .insert({
+      channel_id: channelId,
+      author_id: user.id,
+      body,
+      parent_message_id: parentMessageId ?? null,
+    })
+    .select("id, channel_id, author_id, body, parent_message_id, created_at")
     .single();
 
   if (error || !data) return null;
@@ -144,6 +334,7 @@ export async function sendMessage(
     authorId: data.author_id,
     body: data.body,
     createdAt: data.created_at,
+    parentMessageId: data.parent_message_id ?? undefined,
     author: currentUser ?? undefined,
   };
 }

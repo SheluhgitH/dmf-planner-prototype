@@ -3,6 +3,7 @@ import {
   getChannels,
   getCurrentUser,
   getMessages,
+  getWorkspace,
 } from "@/lib/data/provider";
 
 export default async function ChannelPage({
@@ -11,10 +12,11 @@ export default async function ChannelPage({
   params: Promise<{ channelId: string }>;
 }) {
   const { channelId } = await params;
-  const [channels, messages, user] = await Promise.all([
+  const [channels, messages, user, workspace] = await Promise.all([
     getChannels(),
     getMessages(channelId),
     getCurrentUser(),
+    getWorkspace(),
   ]);
 
   const channel = channels.find((c) => c.id === channelId);
@@ -24,6 +26,7 @@ export default async function ChannelPage({
     <ChatView
       channelId={channelId}
       channelName={channelName}
+      workspaceId={workspace.id}
       initialMessages={messages}
       currentUser={user ?? { id: "guest", email: "", displayName: "Guest" }}
     />

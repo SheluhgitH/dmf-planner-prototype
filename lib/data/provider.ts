@@ -67,14 +67,53 @@ export async function getChannels(workspaceId?: string): Promise<Channel[]> {
   );
 }
 
-export async function getMessages(channelId: string): Promise<Message[]> {
+export async function getMessages(
+  channelId: string,
+  options?: { parentId?: string | null; limit?: number }
+): Promise<Message[]> {
   if (isSupabaseConfigured()) {
     const { getMessages: getSupabaseMessages } = await import(
       "./supabase/queries"
     );
-    return getSupabaseMessages(channelId);
+    return getSupabaseMessages(channelId, options);
   }
-  return mockMessages[channelId] ?? [];
+  const messages = mockMessages[channelId] ?? [];
+  if (options?.parentId) {
+    return messages.filter((m) => m.parentMessageId === options.parentId);
+  }
+  if (options?.parentId === undefined) {
+    return messages.filter((m) => !m.parentMessageId);
+  }
+  return messages;
+}
+
+export async function getThreadReplies(
+  parentMessageId: string
+): Promise<Message[]> {
+  if (isSupabaseConfigured()) {
+    const { getThreadReplies: getSupabaseReplies } = await import(
+      "./supabase/queries"
+    );
+    return getSupabaseReplies(parentMessageId);
+  }
+  return Object.values(mockMessages)
+    .flat()
+    .filter((m) => m.parentMessageId === parentMessageId);
+}
+
+export async function getChannelUnreadCounts(): Promise<
+  Record<string, number>
+> {
+  if (isSupabaseConfigured()) {
+    const { getChannelUnreadCounts: getSupabaseUnread } = await import(
+      "./supabase/queries"
+    );
+    const user = await getCurrentUser();
+    const workspace = await getWorkspace();
+    if (!user) return {};
+    return getSupabaseUnread(user.id, workspace.id);
+  }
+  return { ideas: 2 };
 }
 
 export async function getDashboardData(): Promise<DashboardData> {

@@ -33,10 +33,12 @@ export function AppSidebar({
   workspace,
   channels,
   user,
+  unreadCounts = {},
 }: {
   workspace: Workspace;
   channels: Channel[];
   user: User;
+  unreadCounts?: Record<string, number>;
 }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -111,7 +113,14 @@ export function AppSidebar({
                                 )}
                               >
                                 <Hash className="h-3.5 w-3.5" />
-                                {channel.name}
+                                <span className="flex-1 truncate">{channel.name}</span>
+                                {(unreadCounts[channel.id] ?? 0) > 0 && (
+                                  <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-600 px-1.5 text-[10px] font-medium text-white">
+                                    {unreadCounts[channel.id] > 9
+                                      ? "9+"
+                                      : unreadCounts[channel.id]}
+                                  </span>
+                                )}
                               </Link>
                             </li>
                           ))}

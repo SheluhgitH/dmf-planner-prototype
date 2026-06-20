@@ -93,6 +93,8 @@ export const mockMessages: Record<string, Message[]> = {
       authorId: "user-2",
       body: "Morning team — sprint planning at 2pm today.",
       createdAt: new Date(Date.now() - 3600000).toISOString(),
+      replyCount: 1,
+      reactions: [{ emoji: "👍", count: 2, reactedByMe: false }],
     }),
     withAuthor({
       id: "m2",

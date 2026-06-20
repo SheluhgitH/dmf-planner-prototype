@@ -1,6 +1,7 @@
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { isSupabaseConfigured } from "@/lib/config";
 import {
+  getChannelUnreadCounts,
   getChannels,
   getCurrentUser,
   getWorkspace,
@@ -18,10 +19,11 @@ export default async function AppLayout({
     redirect("/onboarding");
   }
 
-  const [workspace, channels, user] = await Promise.all([
+  const [workspace, channels, user, unreadCounts] = await Promise.all([
     getWorkspace(),
     getChannels(),
     getCurrentUser(),
+    getChannelUnreadCounts(),
   ]);
 
   return (
@@ -30,6 +32,7 @@ export default async function AppLayout({
         workspace={workspace}
         channels={channels}
         user={user ?? { id: "guest", email: "", displayName: "Guest" }}
+        unreadCounts={unreadCounts}
       />
       <main className="flex flex-1 flex-col overflow-hidden">{children}</main>
     </div>
