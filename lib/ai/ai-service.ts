@@ -12,15 +12,19 @@ import {
   heuristicTaskPrefill,
   heuristicTasks,
 } from "@/lib/ai/heuristics";
+import { getChannelSystemPrompt } from "@/lib/ai/channel-profiles";
+import { getGenerationConfig } from "@/lib/ai/generation-config";
 import {
   buildBeatExtractorPrompt,
   buildBriefPrompt,
   buildDigestPrompt,
   buildEventPrefillPrompt,
   buildIntentPrompt,
+  buildJsonRepairPrompt,
   buildPolishPrompt,
   buildRewritePrompt,
   buildSummaryPrompt,
+  buildTaskCandidatesPrompt,
   buildTaskPrefillPrompt,
   buildTasksPrompt,
   buildThreadSummaryPrompt,
@@ -32,85 +36,199 @@ import {
   extractJson,
 } from "@/lib/ai/parse";
 import type {
+  AiContext,
+  AiMember,
   ExtractedBeat,
   ExtractedTask,
   MessageIntent,
   PolishMode,
+  RewriteMode,
+  SummaryFocus,
 } from "@/lib/ai/types";
+import { validateAndEnrichTasks, validateBeats } from "@/lib/ai/validate";
 import { isWebGPUSupported } from "@/lib/ai/webgpu";
 import { webLLMEngine } from "@/lib/ai/webllm-engine";
-
-const SYSTEM = "You are a helpful creative studio assistant for DMF Planner.";
 
 export function canUseWebLLM(): boolean {
   return isWebGPUSupported();
 }
 
-export async function generateSummary(
-  transcript: string,
-  channelName: string
+async function runQuality(
+  ctx: AiContext,
+  userPrompt: string,
+  tool: keyof typeof import("@/lib/ai/generation-config").GENERATION_CONFIG
 ): Promise<string> {
-  if (!canUseWebLLM()) return heuristicSummary(transcript);
+  const config = getGenerationConfig(tool);
+  return webLLMEngine.complete(
+    config.tier,
+    getChannelSystemPrompt(ctx.channelType),
+    userPrompt,
+    { temperature: config.temperature, maxTokens: config.maxTokens }
+  );
+}
+
+async function runQualityStream(
+  ctx: AiContext,
+  userPrompt: string,
+  tool: keyof typeof import("@/lib/ai/generation-config").GENERATION_CONFIG
+): Promise<AsyncGenerator<string>> {
+  const config = getGenerationConfig(tool);
+  return webLLMEngine.stream(
+    config.tier,
+    getChannelSystemPrompt(ctx.channelType),
+    userPrompt,
+    { temperature: config.temperature, maxTokens: config.maxTokens }
+  );
+}
+
+async function repairJson(raw: string, ctx: AiContext): Promise<string> {
+  const config = getGenerationConfig("jsonRepair");
+  return webLLMEngine.complete(
+    config.tier,
+    getChannelSystemPrompt(ctx.channelType),
+    buildJsonRepairPrompt(raw),
+    { temperature: config.temperature, maxTokens: config.maxTokens }
+  );
+}
+
+export async function generateSummary(
+  ctx: AiContext,
+  focus: SummaryFocus = "all"
+): Promise<string> {
+  if (!canUseWebLLM()) return heuristicSummary(ctx.transcript);
   try {
-    return await webLLMEngine.complete(
-      "quality",
-      SYSTEM,
-      buildSummaryPrompt(transcript, channelName),
-      800
-    );
+    return await runQuality(ctx, buildSummaryPrompt(ctx, focus), "summary");
   } catch {
-    return heuristicSummary(transcript);
+    return heuristicSummary(ctx.transcript);
+  }
+}
+
+export async function* streamSummary(
+  ctx: AiContext,
+  focus: SummaryFocus = "all"
+): AsyncGenerator<string> {
+  if (!canUseWebLLM()) {
+    yield heuristicSummary(ctx.transcript);
+    return;
+  }
+  try {
+    const stream = await runQualityStream(
+      ctx,
+      buildSummaryPrompt(ctx, focus),
+      "summary"
+    );
+    for await (const chunk of stream) yield chunk;
+  } catch {
+    yield heuristicSummary(ctx.transcript);
   }
 }
 
 export async function extractTasks(
-  transcript: string,
-  channelName: string
-): Promise<ExtractedTask[]> {
-  if (!canUseWebLLM()) return heuristicTasks(transcript);
+  ctx: AiContext,
+  members: AiMember[] = []
+): Promise<{ tasks: ExtractedTask[]; debug?: string }> {
+  if (!canUseWebLLM()) {
+    return { tasks: validateAndEnrichTasks(heuristicTasks(ctx.transcript), members) };
+  }
   try {
-    const raw = await webLLMEngine.complete(
-      "quality",
-      SYSTEM,
-      buildTasksPrompt(transcript, channelName),
-      600
+    const candConfig = getGenerationConfig("taskCandidates");
+    const candidates = await webLLMEngine.complete(
+      candConfig.tier,
+      getChannelSystemPrompt(ctx.channelType),
+      buildTaskCandidatesPrompt(ctx),
+      { temperature: candConfig.temperature, maxTokens: candConfig.maxTokens }
     );
-    const tasks = parseTasksFromModel(raw);
-    return tasks.length > 0 ? tasks : heuristicTasks(transcript);
+
+    let raw = await runQuality(
+      ctx,
+      buildTasksPrompt(ctx, candidates || ctx.transcript),
+      "tasks"
+    );
+    let tasks = parseTasksFromModel(raw);
+    if (tasks.length === 0) {
+      const repaired = await repairJson(raw, ctx);
+      tasks = parseTasksFromModel(repaired);
+      if (tasks.length > 0) raw = repaired;
+    }
+    if (tasks.length === 0) {
+      return {
+        tasks: validateAndEnrichTasks(heuristicTasks(ctx.transcript), members),
+        debug: raw,
+      };
+    }
+    return { tasks: validateAndEnrichTasks(tasks, members) };
   } catch {
-    return heuristicTasks(transcript);
+    return { tasks: validateAndEnrichTasks(heuristicTasks(ctx.transcript), members) };
   }
 }
 
-export async function generateBrief(
-  transcript: string,
-  channelName: string,
-  taskTitles = ""
+export async function generateBrief(ctx: AiContext): Promise<string> {
+  if (!canUseWebLLM()) return heuristicBrief(ctx.transcript, ctx.channelName);
+  try {
+    return await runQuality(ctx, buildBriefPrompt(ctx), "brief");
+  } catch {
+    return heuristicBrief(ctx.transcript, ctx.channelName);
+  }
+}
+
+export async function* streamBrief(ctx: AiContext): AsyncGenerator<string> {
+  if (!canUseWebLLM()) {
+    yield heuristicBrief(ctx.transcript, ctx.channelName);
+    return;
+  }
+  try {
+    const stream = await runQualityStream(ctx, buildBriefPrompt(ctx), "brief");
+    for await (const chunk of stream) yield chunk;
+  } catch {
+    yield heuristicBrief(ctx.transcript, ctx.channelName);
+  }
+}
+
+export async function rewriteScript(
+  text: string,
+  mode: RewriteMode = "polish",
+  channelType: AiContext["channelType"] = "scripts"
 ): Promise<string> {
-  if (!canUseWebLLM()) return heuristicBrief(transcript, channelName);
-  try {
-    return await webLLMEngine.complete(
-      "quality",
-      SYSTEM,
-      buildBriefPrompt(transcript, channelName, taskTitles),
-      1000
-    );
-  } catch {
-    return heuristicBrief(transcript, channelName);
-  }
-}
-
-export async function rewriteScript(text: string): Promise<string> {
   if (!canUseWebLLM()) return heuristicRewrite(text);
+  const ctx: AiContext = {
+    transcript: text,
+    channelName: "rewrite",
+    channelType,
+    memberNames: [],
+    messageCount: 1,
+  };
   try {
-    return await webLLMEngine.complete(
-      "quality",
-      SYSTEM,
-      buildRewritePrompt(text),
-      1200
-    );
+    return await runQuality(ctx, buildRewritePrompt(text, mode), "rewrite");
   } catch {
     return heuristicRewrite(text);
+  }
+}
+
+export async function* streamRewrite(
+  text: string,
+  mode: RewriteMode = "polish",
+  channelType: AiContext["channelType"] = "scripts"
+): AsyncGenerator<string> {
+  if (!canUseWebLLM()) {
+    yield heuristicRewrite(text);
+    return;
+  }
+  const ctx: AiContext = {
+    transcript: text,
+    channelName: "rewrite",
+    channelType,
+    memberNames: [],
+    messageCount: 1,
+  };
+  try {
+    const stream = await runQualityStream(
+      ctx,
+      buildRewritePrompt(text, mode),
+      "rewrite"
+    );
+    for await (const chunk of stream) yield chunk;
+  } catch {
+    yield heuristicRewrite(text);
   }
 }
 
@@ -120,11 +238,12 @@ export async function polishMessage(
 ): Promise<string> {
   if (!canUseWebLLM()) return heuristicPolish(text, mode);
   try {
+    const config = getGenerationConfig("taskCandidates");
     return await webLLMEngine.complete(
-      "fast",
-      SYSTEM,
+      config.tier,
+      "You are a helpful writing assistant.",
       buildPolishPrompt(text, mode),
-      400
+      { temperature: config.temperature, maxTokens: 400 }
     );
   } catch {
     return heuristicPolish(text, mode);
@@ -138,11 +257,12 @@ export async function classifyMessageIntent(
     return heuristicIntent(body);
   }
   try {
+    const config = getGenerationConfig("taskCandidates");
     const raw = await webLLMEngine.complete(
-      "fast",
-      SYSTEM,
+      config.tier,
+      "You are a message classifier.",
       buildIntentPrompt(body),
-      64
+      { temperature: config.temperature, maxTokens: 64 }
     );
     const intents = parseIntentsFromModel(raw);
     return intents.length > 0 ? intents : heuristicIntent(body);
@@ -162,12 +282,18 @@ export async function prefillTaskFromMessage(
   projectHint?: string;
 }> {
   if (!canUseWebLLM()) return heuristicTaskPrefill(body);
+  const ctx: AiContext = {
+    transcript: body,
+    channelName,
+    channelType: "general",
+    memberNames,
+    messageCount: 1,
+  };
   try {
-    const raw = await webLLMEngine.complete(
-      "quality",
-      SYSTEM,
+    const raw = await runQuality(
+      ctx,
       buildTaskPrefillPrompt(body, channelName, memberNames),
-      256
+      "tasks"
     );
     const parsed = extractJson<{
       title?: string;
@@ -189,20 +315,29 @@ export async function prefillEventFromMessage(body: string): Promise<{
   location?: string;
 }> {
   if (!canUseWebLLM()) return heuristicEventPrefill(body);
+  const ctx: AiContext = {
+    transcript: body,
+    channelName: "events",
+    channelType: "events",
+    memberNames: [],
+    messageCount: 1,
+  };
   try {
-    const raw = await webLLMEngine.complete(
-      "quality",
-      SYSTEM,
-      buildEventPrefillPrompt(body),
-      256
-    );
+    const raw = await runQuality(ctx, buildEventPrefillPrompt(body), "tasks");
     const parsed = extractJson<{
       title?: string;
       date?: string;
       time?: string;
       location?: string;
     }>(raw);
-    if (parsed?.title) return parsed as { title: string; date?: string; time?: string; location?: string };
+    if (parsed?.title) {
+      return parsed as {
+        title: string;
+        date?: string;
+        time?: string;
+        location?: string;
+      };
+    }
     return heuristicEventPrefill(body);
   } catch {
     return heuristicEventPrefill(body);
@@ -211,12 +346,20 @@ export async function prefillEventFromMessage(body: string): Promise<{
 
 export async function summarizeThread(transcript: string): Promise<string> {
   if (!canUseWebLLM()) return heuristicSummary(transcript);
+  const ctx: AiContext = {
+    transcript,
+    channelName: "thread",
+    channelType: "general",
+    memberNames: [],
+    messageCount: 1,
+  };
   try {
+    const config = getGenerationConfig("summary");
     return await webLLMEngine.complete(
-      "quality",
-      SYSTEM,
+      config.tier,
+      getChannelSystemPrompt("general"),
       buildThreadSummaryPrompt(transcript),
-      500
+      { temperature: config.temperature, maxTokens: config.maxTokens }
     );
   } catch {
     return heuristicSummary(transcript);
@@ -226,11 +369,12 @@ export async function summarizeThread(transcript: string): Promise<string> {
 export async function generateStudioDigest(context: string): Promise<string> {
   if (!canUseWebLLM()) return heuristicDigest(context);
   try {
+    const config = getGenerationConfig("summary");
     return await webLLMEngine.complete(
-      "quality",
-      SYSTEM,
+      config.tier,
+      getChannelSystemPrompt("general"),
       buildDigestPrompt(context),
-      400
+      { temperature: config.temperature, maxTokens: config.maxTokens }
     );
   } catch {
     return heuristicDigest(context);
@@ -238,36 +382,49 @@ export async function generateStudioDigest(context: string): Promise<string> {
 }
 
 export async function extractScriptBeats(
-  transcript: string
-): Promise<{ beats: ExtractedBeat[]; formatted: string }> {
+  ctx: AiContext
+): Promise<{ beats: ExtractedBeat[]; formatted: string; debug?: string }> {
   if (!canUseWebLLM()) {
-    return { beats: [], formatted: heuristicBeatExtractor(transcript) };
+    return { beats: [], formatted: heuristicBeatExtractor(ctx.transcript) };
   }
   try {
-    const raw = await webLLMEngine.complete(
-      "quality",
-      SYSTEM,
-      buildBeatExtractorPrompt(transcript),
-      900
-    );
-    const beats = parseBeatsFromModel(raw);
+    let raw = await runQuality(ctx, buildBeatExtractorPrompt(ctx), "beats");
+    let beats = validateBeats(parseBeatsFromModel(raw));
     if (beats.length === 0) {
-      return { beats: [], formatted: heuristicBeatExtractor(transcript) };
+      const repaired = await repairJson(raw, ctx);
+      beats = validateBeats(parseBeatsFromModel(repaired));
+      if (beats.length > 0) raw = repaired;
+    }
+    if (beats.length === 0) {
+      return {
+        beats: [],
+        formatted: heuristicBeatExtractor(ctx.transcript),
+        debug: raw,
+      };
     }
     const formatted =
       "## Script beats\n\n" +
       beats
         .map((b) => {
           let line = `### ${b.scene}`;
+          if (b.characters) line += `\nCharacters: ${b.characters}`;
           if (b.notes) line += `\n${b.notes}`;
           if (b.suggestedTask) line += `\n→ Task: ${b.suggestedTask}`;
+          if (b.priority) line += ` [${b.priority}]`;
           return line;
         })
         .join("\n\n");
     return { beats, formatted };
   } catch {
-    return { beats: [], formatted: heuristicBeatExtractor(transcript) };
+    return { beats: [], formatted: heuristicBeatExtractor(ctx.transcript) };
   }
+}
+
+export async function* streamScriptBeats(
+  ctx: AiContext
+): AsyncGenerator<string> {
+  const result = await extractScriptBeats(ctx);
+  yield result.formatted;
 }
 
 export { webLLMEngine };

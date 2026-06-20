@@ -6,7 +6,14 @@ import {
   getSharedWorkspace,
   getDashboardData,
 } from "@/lib/data/supabase/queries";
-import { getProjects } from "@/lib/data/provider";
+import { getProjects, getWorkspaceMembers, getEvents } from "@/lib/data/provider";
+import { formatTranscriptFromMessages } from "@/lib/ai/parse";
+import { resolveChannelType } from "@/lib/ai/validate";
+import type { AiContext, AiMember, ChannelType } from "@/lib/ai/types";
+
+export type ChannelContextResult =
+  | (AiContext & { members: AiMember[]; taskTitles?: string })
+  | { error: string };
 
 export async function getChannelsForAiAction(): Promise<{
   channels?: { id: string; name: string }[];
@@ -26,17 +33,17 @@ export async function getChannelsForAiAction(): Promise<{
   return { channels: data ?? [] };
 }
 
-export async function getChannelContextAction(channelId: string): Promise<{
-  transcript?: string;
-  channelName?: string;
-  taskTitles?: string;
-  error?: string;
-}> {
+export async function getChannelContextAction(
+  channelId: string,
+  messageLimit = 30
+): Promise<ChannelContextResult> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
-  const messages = await getMessages(channelId, { limit: 30 });
+  const messages = await getMessages(channelId, { limit: messageLimit });
   if (messages.length === 0) {
     return { error: "No messages in this channel yet" };
   }
@@ -47,23 +54,59 @@ export async function getChannelContextAction(channelId: string): Promise<{
     .eq("id", channelId)
     .maybeSingle();
 
-  const transcript = messages
-    .map((m) => `${m.author?.displayName ?? "User"}: ${m.body}`)
-    .join("\n");
+  const channelName = channel?.name ?? "channel";
+  const channelType: ChannelType = resolveChannelType(channelName);
+  const { transcript, messageCount, dateRange } =
+    formatTranscriptFromMessages(messages, messageLimit);
+
+  const workspaceMembers = await getWorkspaceMembers();
+  const members: AiMember[] = workspaceMembers.map((m) => ({
+    id: m.user.id,
+    displayName: m.user.displayName,
+  }));
+  const memberNames = members.map((m) => m.displayName);
 
   const projects = await getProjects();
-  const linkedProject = projects.find((p) =>
-    channel?.name ? `project-${p.name.toLowerCase().replace(/\s+/g, "-")}` === channel.name ||
-      channel.name.includes(p.name.toLowerCase().replace(/\s+/g, "-"))
-    : false
-  );
+  const slug = channelName.replace(/^project-/, "");
+  const linkedProject = projects.find((p) => {
+    const pSlug = p.name.toLowerCase().replace(/\s+/g, "-");
+    return (
+      channelName === `project-${pSlug}` ||
+      channelName.includes(pSlug) ||
+      p.name.toLowerCase() === slug.replace(/-/g, " ")
+    );
+  });
+
+  const events = await getEvents();
+  const today = new Date().toISOString().split("T")[0];
+  const upcomingEvents = events
+    .filter((e) => e.date >= today)
+    .slice(0, 5)
+    .map((e) => ({ title: e.title, date: e.date }));
+
   const taskTitles = linkedProject
     ? linkedProject.tasks.map((t) => `- ${t.title} (${t.status})`).join("\n")
     : "";
 
   return {
     transcript,
-    channelName: channel?.name ?? "channel",
+    channelName,
+    channelType,
+    memberNames,
+    members,
+    linkedProject: linkedProject
+      ? {
+          id: linkedProject.id,
+          name: linkedProject.name,
+          tasks: linkedProject.tasks.map((t) => ({
+            title: t.title,
+            status: t.status,
+          })),
+        }
+      : undefined,
+    upcomingEvents,
+    messageCount,
+    dateRange,
     taskTitles,
   };
 }
@@ -73,7 +116,9 @@ export async function getThreadContextAction(
   parentMessageId: string
 ): Promise<{ transcript?: string; error?: string }> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
   const { data: parentRow } = await supabase
@@ -106,7 +151,9 @@ export async function getStudioDigestContextAction(): Promise<{
   error?: string;
 }> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
   const data = await getDashboardData();
@@ -151,39 +198,4 @@ export async function getStudioDigestContextAction(): Promise<{
   }
 
   return { context: parts.join("\n\n") };
-}
-
-/** @deprecated Use client-side WebLLM via ai-service */
-export async function generateFromChatContextAction(
-  channelId: string,
-  tool: "summary" | "tasks" | "brief"
-): Promise<{ output?: string; error?: string }> {
-  const { transcript, channelName, error } = await getChannelContextAction(channelId);
-  if (error || !transcript) return { error: error ?? "No context" };
-
-  if (tool === "summary") {
-    const bullets = transcript
-      .split("\n")
-      .filter((l) => l.length > 20)
-      .slice(-10)
-      .map((l) => `• ${l.slice(0, 120)}`);
-    return {
-      output: `Meeting Summary (offline)\n\n${bullets.join("\n")}\n\nAction items:\n• Review notes above`,
-    };
-  }
-
-  if (tool === "tasks") {
-    const suggestions = transcript
-      .split("\n")
-      .filter((l) => l.length > 15)
-      .slice(-5)
-      .map((l, i) => `${i + 1}. ${l.slice(0, 80)}`);
-    return {
-      output: `Suggested tasks:\n\n${suggestions.join("\n")}`,
-    };
-  }
-
-  return {
-    output: `Project Brief (offline)\n\n#${channelName}\n\n${transcript.slice(0, 500)}...`,
-  };
 }

@@ -6,6 +6,11 @@ import type { InitProgress } from "@/lib/ai/types";
 
 type ProgressListener = (progress: InitProgress) => void;
 
+export type CompleteOptions = {
+  temperature?: number;
+  maxTokens?: number;
+};
+
 class WebLLMEngine {
   private engine: MLCEngine | null = null;
   private loadedModelId: string | null = null;
@@ -65,16 +70,18 @@ class WebLLMEngine {
     tier: ModelTier,
     systemPrompt: string,
     userPrompt: string,
-    maxTokens = 1024
+    options: CompleteOptions = {}
   ): Promise<string> {
     const engine = await this.ensureModel(tier);
+    const temperature = options.temperature ?? (tier === "fast" ? 0.3 : 0.7);
+    const max_tokens = options.maxTokens ?? 1024;
     const response = await engine.chat.completions.create({
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      temperature: tier === "fast" ? 0.3 : 0.7,
-      max_tokens: maxTokens,
+      temperature,
+      max_tokens,
     });
     return response.choices[0]?.message?.content?.trim() ?? "";
   }
@@ -83,9 +90,11 @@ class WebLLMEngine {
     tier: ModelTier,
     systemPrompt: string,
     userPrompt: string,
-    maxTokens = 1024
+    options: CompleteOptions = {}
   ): AsyncGenerator<string> {
     const engine = await this.ensureModel(tier);
+    const temperature = options.temperature ?? (tier === "fast" ? 0.3 : 0.7);
+    const max_tokens = options.maxTokens ?? 1024;
     const chunks = await engine.chat.completions.create({
       stream: true,
       stream_options: { include_usage: false },
@@ -93,8 +102,8 @@ class WebLLMEngine {
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      temperature: tier === "fast" ? 0.3 : 0.7,
-      max_tokens: maxTokens,
+      temperature,
+      max_tokens,
     });
 
     for await (const chunk of chunks) {

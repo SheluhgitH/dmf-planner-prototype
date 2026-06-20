@@ -1,3 +1,4 @@
+import type { Message } from "@/lib/data/types";
 import type { ExtractedBeat, ExtractedTask, MessageIntent } from "@/lib/ai/types";
 
 export function extractJson<T>(text: string): T | null {
@@ -31,12 +32,49 @@ export function parseBeatsFromModel(text: string): ExtractedBeat[] {
   return parsed.beats.filter((b) => b.scene?.trim());
 }
 
-export function formatTranscript(
-  messages: { author?: string; body: string }[],
+export function formatTranscriptFromMessages(
+  messages: Message[],
   max = 30
+): { transcript: string; messageCount: number; dateRange?: { from: string; to: string } } {
+  const slice = messages
+    .filter((m) => m.body.trim().length > 0)
+    .slice(-max);
+
+  const lines = slice.map((m) => {
+    const ts = formatMessageTimestamp(m.createdAt);
+    const author = m.author?.displayName ?? "User";
+    return `[${ts}] ${author}: ${m.body.trim()}`;
+  });
+
+  const dateRange =
+    slice.length > 0
+      ? {
+          from: formatMessageTimestamp(slice[0].createdAt),
+          to: formatMessageTimestamp(slice[slice.length - 1].createdAt),
+        }
+      : undefined;
+
+  return {
+    transcript: lines.join("\n"),
+    messageCount: slice.length,
+    dateRange,
+  };
+}
+
+function formatMessageTimestamp(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+export function formatContextStats(
+  channelName: string,
+  messageCount: number,
+  memberCount: number
 ): string {
-  const slice = messages.slice(-max);
-  return slice
-    .map((m) => `${m.author ?? "User"}: ${m.body}`)
-    .join("\n");
+  return `Using ${messageCount} message${messageCount === 1 ? "" : "s"} from #${channelName} · ${memberCount} team member${memberCount === 1 ? "" : "s"}`;
 }

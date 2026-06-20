@@ -1,50 +1,167 @@
-import type { PolishMode } from "@/lib/ai/types";
+import type {
+  AiContext,
+  PolishMode,
+  RewriteMode,
+  SummaryFocus,
+} from "@/lib/ai/types";
+import { getChannelFocusHint } from "@/lib/ai/channel-profiles";
 
-export function buildSummaryPrompt(transcript: string, channelName: string): string {
-  return `You are a production assistant for a creative studio. Summarize this #${channelName} channel discussion.
+function contextHeader(ctx: AiContext): string {
+  const parts = [
+    `Channel: #${ctx.channelName} (${ctx.channelType})`,
+    `Messages: ${ctx.messageCount}`,
+  ];
+  if (ctx.dateRange) {
+    parts.push(`Range: ${ctx.dateRange.from} – ${ctx.dateRange.to}`);
+  }
+  if (ctx.memberNames.length > 0) {
+    parts.push(`Team: ${ctx.memberNames.join(", ")}`);
+  }
+  if (ctx.linkedProject) {
+    parts.push(`Project: ${ctx.linkedProject.name}`);
+  }
+  if (ctx.upcomingEvents?.length) {
+    parts.push(
+      `Upcoming events: ${ctx.upcomingEvents.map((e) => `${e.title} (${e.date})`).join("; ")}`
+    );
+  }
+  return parts.join("\n");
+}
 
-Output format:
-## Summary
-(bullet points)
+export function buildSummaryPrompt(ctx: AiContext, focus: SummaryFocus = "all"): string {
+  const focusLine =
+    focus === "decisions"
+      ? "Focus only on decisions made."
+      : focus === "actions"
+        ? "Focus only on action items."
+        : "Cover all sections below.";
+
+  const example =
+    focus === "all"
+      ? `
+Example input:
+[Jun 20 2pm] Alex: Let's shoot Scene 3 Friday at the warehouse
+[Jun 20 2:05pm] Jordan: I'll book the location
+
+Example output:
+## Decisions
+- Scene 3 shoots Friday at the warehouse
 
 ## Action items
-- [owner if known] task
+- Jordan: Book warehouse location
 
-Keep it concise and practical.
+## Open questions
+- (none)
+
+## Parking lot
+- (none)`
+      : "";
+
+  return `${getChannelFocusHint(ctx.channelType)}
+
+${focusLine}
+
+Output format:
+## Decisions
+## Action items
+- [owner if known] task (due date if stated)
+## Open questions
+## Parking lot
+${example}
+
+Context:
+${contextHeader(ctx)}
 
 Transcript:
-${transcript}`;
+${ctx.transcript}`;
 }
 
-export function buildTasksPrompt(transcript: string, channelName: string): string {
-  return `Extract actionable tasks from this #${channelName} discussion.
-
-Return ONLY a JSON array with objects: {"title": string, "assignee"?: string, "dueDate"?: "YYYY-MM-DD"}
-No markdown, no explanation.
+export function buildTaskCandidatesPrompt(ctx: AiContext): string {
+  return `From this #${ctx.channelName} discussion, list only lines that imply a concrete action someone should take.
+One action per line. Skip greetings, reactions, and vague chat.
+Ignore lines that are already completed.
 
 Transcript:
-${transcript}`;
+${ctx.transcript}`;
 }
 
-export function buildBriefPrompt(
-  transcript: string,
-  channelName: string,
-  taskTitles: string
-): string {
-  return `Write a project brief from this creative studio channel #${channelName}.
+export function buildTasksPrompt(ctx: AiContext, candidates: string): string {
+  const members =
+    ctx.memberNames.length > 0
+      ? ctx.memberNames.join(", ")
+      : "none listed";
 
+  return `Convert these action candidates into a JSON array for a creative studio task board.
+
+Rules:
+- Verb-led titles, max 80 characters
+- assignee must be one of: ${members} — or omit assignee
+- dueDate as YYYY-MM-DD only if clearly stated, else omit
+- No duplicates
+
+Example output:
+[{"title":"Book warehouse for Scene 3","assignee":"Jordan","dueDate":"2026-06-27"}]
+
+Return ONLY the JSON array. No markdown.
+
+Candidates:
+${candidates}`;
+}
+
+export function buildJsonRepairPrompt(broken: string): string {
+  return `Fix this into valid JSON only. Return ONLY the corrected JSON array or object.
+
+${broken}`;
+}
+
+export function buildBriefPrompt(ctx: AiContext): string {
+  const taskBlock = ctx.linkedProject?.tasks.length
+    ? `\nLinked project tasks:\n${ctx.linkedProject.tasks.map((t) => `- ${t.title} (${t.status})`).join("\n")}`
+    : "";
+
+  const ideasExtra =
+    ctx.channelType === "ideas"
+      ? `
+## Logline
+## Target audience
+## 3-act skeleton`
+      : "";
+
+  return `${getChannelFocusHint(ctx.channelType)}
+
+Write a project brief from this channel discussion.
+
+Required sections:
 ## Overview
 ## Goals
-## Open questions
+## Current status
 ## Blocked / pending tasks
-${taskTitles ? `\nKnown tasks:\n${taskTitles}` : ""}
+## Open questions
+## Next 5 actions
+${ideasExtra}
+${taskBlock}
+
+Context:
+${contextHeader(ctx)}
 
 Transcript:
-${transcript}`;
+${ctx.transcript}`;
 }
 
-export function buildRewritePrompt(text: string): string {
-  return `Polish this script or creative writing. Preserve meaning and voice. Return only the rewritten text.
+export function buildRewritePrompt(text: string, mode: RewriteMode): string {
+  const instructions: Record<RewriteMode, string> = {
+    polish:
+      "Polish dialogue and prose for clarity and flow. Preserve voice, character names, INT/EXT sluglines, and parentheticals. Do not change plot.",
+    tighten:
+      "Tighten pacing. Cut redundancy. Keep scene structure, character names, and sluglines intact.",
+    grammar:
+      "Fix grammar and spelling only. Minimal changes to wording and structure.",
+    stage_directions:
+      "Clean up stage directions and action lines. Keep dialogue unchanged. Standardize INT/EXT formatting.",
+  };
+  return `${instructions[mode]}
+
+Return only the rewritten text.
 
 ${text}`;
 }
@@ -98,10 +215,17 @@ export function buildDigestPrompt(context: string): string {
 ${context}`;
 }
 
-export function buildBeatExtractorPrompt(transcript: string): string {
-  return `Analyze this script/production discussion. Return ONLY JSON:
-{"beats":[{"scene": string, "notes"?: string, "suggestedTask"?: string}]}
+export function buildBeatExtractorPrompt(ctx: AiContext): string {
+  return `${getChannelFocusHint(ctx.channelType)}
+
+Analyze this script/production discussion. Return ONLY JSON:
+{"beats":[{"scene": string, "characters"?: string, "notes"?: string, "suggestedTask"?: string, "priority"?: "low"|"medium"|"high"}]}
+
+Look for INT/EXT, Scene numbers, table reads, and production notes.
+
+Context:
+${contextHeader(ctx)}
 
 Transcript:
-${transcript}`;
+${ctx.transcript}`;
 }
