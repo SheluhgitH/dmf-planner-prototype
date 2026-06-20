@@ -8,10 +8,11 @@ export async function GET(request: Request) {
 
   if (code) {
     const supabase = await createClient();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) {
-      return NextResponse.redirect(`${origin}${next}`);
-    }
+    await supabase.auth.exchangeCodeForSession(code);
+
+    const { data: workspaces } = await supabase.from("workspaces").select("id").limit(1);
+    const redirectTo = workspaces?.length ? "/dashboard" : "/onboarding";
+    return NextResponse.redirect(`${origin}${redirectTo}`);
   }
 
   return NextResponse.redirect(`${origin}/login?error=auth`);

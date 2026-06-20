@@ -13,6 +13,11 @@ export async function createWorkspace(formData: FormData) {
     .replace(/^-|-$/g, "");
 
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return { error: "Please sign in and confirm your email before creating a workspace." };
+  }
+
   const { data, error } = await supabase.rpc("create_workspace_for_user", {
     ws_name: name,
     ws_slug: slug || "workspace",

@@ -102,9 +102,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     todaysTasks: mockProjects
       .flatMap((p) => p.tasks)
       .filter((t) => t.dueDate === today),
-    upcomingEvents: mockEvents
-      .filter((e) => e.date >= today)
-      .slice(0, 4),
+    upcomingEvents: mockEvents.filter((e) => e.date >= today).slice(0, 4),
     activeProjects: mockProjects.filter((p) => p.status === "active"),
   };
 }

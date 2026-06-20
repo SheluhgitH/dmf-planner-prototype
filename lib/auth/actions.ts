@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { MOCK_SESSION_COOKIE, isSupabaseConfigured } from "@/lib/config";
 import { createClient } from "@/lib/data/supabase/server";
+import { signIn, signUp } from "@/lib/data/supabase/queries";
 
 export async function mockLogin(email: string) {
   if (isSupabaseConfigured()) return;
@@ -56,8 +57,12 @@ export async function supabaseSignup(
   password: string,
   displayName: string
 ) {
-  const { signUp } = await import("@/lib/data/supabase/queries");
-  const { error } = await signUp(email, password, displayName);
+  const { data, error } = await signUp(email, password, displayName);
   if (error) return { error: error.message };
+
+  // Email confirmation enabled → no session yet
+  if (!data?.session) {
+    redirect("/signup/confirm-email");
+  }
   redirect("/onboarding");
 }

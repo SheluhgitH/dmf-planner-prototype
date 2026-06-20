@@ -163,6 +163,7 @@ export async function getDashboardData(): Promise<DashboardData> {
 
   const channels = await getChannels(workspace.id);
   const recentMessages: DashboardData["recentMessages"] = [];
+  const today = new Date().toISOString().split("T")[0];
 
   for (const channel of channels.slice(0, 4)) {
     const messages = await getMessages(channel.id);
@@ -172,6 +173,11 @@ export async function getDashboardData(): Promise<DashboardData> {
     }
   }
 
+  const events = await getEvents(workspace.id);
+  const upcomingEvents = events
+    .filter((e) => e.date >= today)
+    .slice(0, 4);
+
   return {
     workspaces,
     recentMessages: recentMessages.sort(
@@ -179,7 +185,7 @@ export async function getDashboardData(): Promise<DashboardData> {
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     ),
     todaysTasks: [],
-    upcomingEvents: [],
+    upcomingEvents,
     activeProjects: [],
   };
 }
@@ -188,8 +194,28 @@ export async function getProjects(): Promise<Project[]> {
   return [];
 }
 
-export async function getEvents(): Promise<PlannerEvent[]> {
-  return [];
+export async function getEvents(workspaceId?: string): Promise<PlannerEvent[]> {
+  const supabase = await createClient();
+  let query = supabase
+    .from("events")
+    .select("id, workspace_id, title, date, time, location")
+    .order("date")
+    .order("time");
+
+  if (workspaceId) {
+    query = query.eq("workspace_id", workspaceId);
+  }
+
+  const { data } = await query;
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    workspaceId: row.workspace_id,
+    title: row.title,
+    date: row.date,
+    time: row.time ?? undefined,
+    location: row.location ?? undefined,
+  }));
 }
 
 export async function signIn(email: string, password: string) {
@@ -197,13 +223,18 @@ export async function signIn(email: string, password: string) {
   return supabase.auth.signInWithPassword({ email, password });
 }
 
-export async function signUp(email: string, password: string, displayName: string) {
+export async function signUp(
+  email: string,
+  password: string,
+  displayName: string
+) {
   const supabase = await createClient();
-  return supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: { data: { display_name: displayName } },
   });
+  return { data, error };
 }
 
 export async function signOut() {

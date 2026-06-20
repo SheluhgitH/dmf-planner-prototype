@@ -5,6 +5,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { CreateEventButton } from "@/components/events/create-event-button";
 
 function getDaysInMonth(year: number, month: number) {
   return new Date(year, month + 1, 0).getDate();
@@ -39,9 +40,12 @@ export default async function EventsPage() {
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-zinc-100">Events</h1>
-        <p className="text-zinc-400">Calendar, RSVPs, and reminders.</p>
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-zinc-100">Events</h1>
+          <p className="text-zinc-400">Calendar, RSVPs, and reminders.</p>
+        </div>
+        <CreateEventButton />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">

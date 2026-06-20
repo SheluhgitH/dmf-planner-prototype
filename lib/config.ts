@@ -9,6 +9,7 @@ export const MOCK_SESSION_COOKIE = "dmf-mock-session";
 
 export const APP_ROUTES = [
   "/dashboard",
+  "/onboarding", // add
   "/chat",
   "/projects",
   "/events",
