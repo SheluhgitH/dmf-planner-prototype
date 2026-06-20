@@ -14,6 +14,7 @@ export function ThreadPanel({
   onClose,
   onSend,
   onToggleReaction,
+  uploadError,
 }: {
   parentMessage: Message;
   replies: Message[];
@@ -22,6 +23,7 @@ export function ThreadPanel({
   onClose: () => void;
   onSend: (body: string, file?: File) => Promise<void>;
   onToggleReaction: (messageId: string, emoji: string, reactedByMe: boolean) => void;
+  uploadError?: string | null;
 }) {
   return (
     <aside className="flex w-full max-w-md flex-col border-l border-zinc-800 bg-zinc-950">
@@ -60,6 +62,7 @@ export function ThreadPanel({
       <MessageComposer
         channelName={channelName}
         onSend={onSend}
+        uploadError={uploadError}
       />
     </aside>
   );

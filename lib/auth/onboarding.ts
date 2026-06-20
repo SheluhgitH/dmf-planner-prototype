@@ -3,28 +3,17 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/data/supabase/server";
 
-export async function createWorkspace(formData: FormData) {
-  const name = (formData.get("name") as string)?.trim();
-  if (!name) return { error: "Workspace name is required" };
-
-  const slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-
+export async function joinSharedWorkspace() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
-    return { error: "Please sign in and confirm your email before creating a workspace." };
+    return { error: "Please sign in before joining the workspace." };
   }
 
-  const { data, error } = await supabase.rpc("create_workspace_for_user", {
-    ws_name: name,
-    ws_slug: slug || "workspace",
-  });
+  const { data, error } = await supabase.rpc("join_shared_workspace");
 
   if (error) return { error: error.message };
-  if (!data) return { error: "Failed to create workspace" };
+  if (!data) return { error: "Failed to join workspace" };
 
   redirect("/dashboard");
 }

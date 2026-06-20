@@ -14,10 +14,19 @@ export async function createEventAction(formData: FormData) {
   const workspace = await supabase
     .from("workspaces")
     .select("id")
-    .limit(1)
-    .single();
+    .eq("slug", "dmf-studio")
+    .maybeSingle();
   if (!workspace.data) {
-    return { error: "No workspace found" };
+    await supabase.rpc("join_shared_workspace");
+    const retry = await supabase
+      .from("workspaces")
+      .select("id")
+      .eq("slug", "dmf-studio")
+      .maybeSingle();
+    if (!retry.data) {
+      return { error: "No workspace found" };
+    }
+    workspace.data = retry.data;
   }
 
   const title = formData.get("title") as string;

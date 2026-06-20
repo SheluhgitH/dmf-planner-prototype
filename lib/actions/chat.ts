@@ -17,7 +17,6 @@ export async function sendMessageAction(
   const message = await sendMessage(channelId, body.trim(), parentMessageId);
   if (!message) return { error: "Failed to send message" };
 
-  revalidatePath(`/chat/${channelId}`);
   return { message };
 }
 
@@ -62,8 +61,6 @@ export async function uploadChatAttachmentAction(
   const { data: signed } = await supabase.storage
     .from("chat-attachments")
     .createSignedUrl(storagePath, 3600);
-
-  revalidatePath(`/chat/${channelId}`);
 
   return {
     attachment: {

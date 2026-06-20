@@ -14,9 +14,23 @@ export default async function AppLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const workspaces = await getWorkspaces();
-  if (isSupabaseConfigured() && workspaces.length === 0) {
-    redirect("/onboarding");
+  if (isSupabaseConfigured()) {
+    const { joinSharedWorkspace, getSharedWorkspace } = await import(
+      "@/lib/data/supabase/queries"
+    );
+    let shared = await getSharedWorkspace();
+    if (!shared) {
+      await joinSharedWorkspace();
+      shared = await getSharedWorkspace();
+    }
+    if (!shared) {
+      redirect("/onboarding");
+    }
+  } else {
+    const workspaces = await getWorkspaces();
+    if (workspaces.length === 0) {
+      redirect("/onboarding");
+    }
   }
 
   const [workspace, channels, user, unreadCounts] = await Promise.all([

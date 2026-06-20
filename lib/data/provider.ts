@@ -48,7 +48,8 @@ export async function getWorkspaceMembers(
     const { getWorkspaceMembers: getSupabaseMembers } = await import(
       "./supabase/queries"
     );
-    return getSupabaseMembers(workspaceId ?? "");
+    const wsId = workspaceId ?? (await getWorkspace()).id;
+    return getSupabaseMembers(wsId);
   }
   return mockMembers.filter(
     (m) => !workspaceId || m.workspaceId === workspaceId
@@ -60,7 +61,8 @@ export async function getChannels(workspaceId?: string): Promise<Channel[]> {
     const { getChannels: getSupabaseChannels } = await import(
       "./supabase/queries"
     );
-    return getSupabaseChannels(workspaceId ?? "");
+    const wsId = workspaceId ?? (await getWorkspace()).id;
+    return getSupabaseChannels(wsId);
   }
   return mockChannels.filter(
     (c) => !workspaceId || c.workspaceId === workspaceId
@@ -164,12 +166,25 @@ export async function getProject(projectId: string): Promise<Project | null> {
 export async function getEvents(): Promise<PlannerEvent[]> {
   if (isSupabaseConfigured()) {
     const { getEvents: getSupabaseEvents } = await import("./supabase/queries");
-    return getSupabaseEvents();
+    const workspace = await getWorkspace();
+    return getSupabaseEvents(workspace.id);
   }
   return mockEvents;
 }
 
 export async function getWorkspace(): Promise<Workspace> {
+  if (isSupabaseConfigured()) {
+    const {
+      getSharedWorkspace,
+      joinSharedWorkspace,
+    } = await import("./supabase/queries");
+    let shared = await getSharedWorkspace();
+    if (!shared) {
+      await joinSharedWorkspace();
+      shared = await getSharedWorkspace();
+    }
+    if (shared) return shared;
+  }
   const workspaces = await getWorkspaces();
   return workspaces[0] ?? mockWorkspace;
 }

@@ -43,6 +43,20 @@ function mergeReaction(
   return list;
 }
 
+function mergeMessages(local: Message[], server: Message[]): Message[] {
+  const localById = new Map(local.map((m) => [m.id, m]));
+  return server.map((serverMsg) => {
+    const localMsg = localById.get(serverMsg.id);
+    if (!localMsg?.attachments?.length) return serverMsg;
+    const serverAttCount = serverMsg.attachments?.length ?? 0;
+    const localAttCount = localMsg.attachments?.length ?? 0;
+    if (localAttCount > serverAttCount) {
+      return { ...serverMsg, attachments: localMsg.attachments };
+    }
+    return serverMsg;
+  });
+}
+
 export function ChatView({
   channelId,
   channelName,
@@ -61,6 +75,7 @@ export function ChatView({
   const [threadReplies, setThreadReplies] = useState<Message[]>([]);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const broadcastRef = useRef<ReturnType<
@@ -68,7 +83,7 @@ export function ChatView({
   > | null>(null);
 
   useEffect(() => {
-    setMessages(initialMessages);
+    setMessages((prev) => mergeMessages(prev, initialMessages));
   }, [initialMessages]);
 
   useEffect(() => {
@@ -305,24 +320,32 @@ export function ChatView({
   }
 
   async function handleSend(body: string, file?: File, parentId?: string) {
+    setUploadError(null);
     if (isSupabaseConfigured()) {
       const { message, error } = await sendMessageAction(
         channelId,
         body,
         parentId ?? replyTo?.id
       );
-      if (error || !message) return;
+      if (error || !message) {
+        setUploadError(error ?? "Failed to send message");
+        return;
+      }
 
       if (file) {
         const fd = new FormData();
         fd.append("file", file);
-        const { attachment } = await uploadChatAttachmentAction(
+        const { attachment, error: uploadErr } = await uploadChatAttachmentAction(
           workspaceId,
           channelId,
           message.id,
           fd
         );
+        if (uploadErr) {
+          setUploadError(uploadErr);
+        }
         if (attachment) {
+          appendAttachment(message.id, attachment);
           message.attachments = [attachment];
         }
       }
@@ -424,6 +447,7 @@ export function ChatView({
 
         <MessageComposer
           channelName={channelName}
+          uploadError={uploadError}
           replyTo={
             replyTo
               ? {
@@ -451,6 +475,7 @@ export function ChatView({
           }}
           onSend={(body, file) => handleSend(body, file, threadParent.id)}
           onToggleReaction={handleToggleReaction}
+          uploadError={uploadError}
         />
       )}
     </div>

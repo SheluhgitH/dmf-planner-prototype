@@ -35,17 +35,13 @@ export async function logout() {
 }
 
 export async function supabaseLogin(email: string, password: string) {
-  const { signIn } = await import("@/lib/data/supabase/queries");
   const { error } = await signIn(email, password);
   if (error) return { error: error.message };
 
   if (isSupabaseConfigured()) {
     const supabase = await createClient();
-    const { data: workspaces } = await supabase
-      .from("workspaces")
-      .select("id")
-      .limit(1);
-    if (!workspaces?.length) {
+    const { error: joinError } = await supabase.rpc("join_shared_workspace");
+    if (joinError) {
       redirect("/onboarding");
     }
   }
@@ -64,5 +60,8 @@ export async function supabaseSignup(
   if (!data?.session) {
     redirect("/signup/confirm-email");
   }
-  redirect("/onboarding");
+
+  const supabase = await createClient();
+  await supabase.rpc("join_shared_workspace");
+  redirect("/dashboard");
 }

@@ -12,6 +12,7 @@ export function MessageComposer({
   onSend,
   onTyping,
   disabled,
+  uploadError,
 }: {
   channelName: string;
   replyTo?: { id: string; authorName: string; body: string };
@@ -19,6 +20,7 @@ export function MessageComposer({
   onSend: (body: string, file?: File) => Promise<void>;
   onTyping?: () => void;
   disabled?: boolean;
+  uploadError?: string | null;
 }) {
   const [input, setInput] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -65,6 +67,9 @@ export function MessageComposer({
             <X className="h-4 w-4" />
           </button>
         </div>
+      )}
+      {uploadError && (
+        <p className="mb-2 text-sm text-red-400">{uploadError}</p>
       )}
       <div className="flex gap-2">
         <label className="flex cursor-pointer items-center">

@@ -33,7 +33,31 @@ export async function getCurrentUser(): Promise<User | null> {
   };
 }
 
+export const SHARED_WORKSPACE_SLUG = "dmf-studio";
+
+export async function joinSharedWorkspace(): Promise<string | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("join_shared_workspace");
+  if (error || !data) return null;
+  return data as string;
+}
+
+export async function getSharedWorkspace(): Promise<Workspace | null> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("workspaces")
+    .select("id, name, slug")
+    .eq("slug", SHARED_WORKSPACE_SLUG)
+    .maybeSingle();
+
+  if (!data) return null;
+  return { id: data.id, name: data.name, slug: data.slug };
+}
+
 export async function getWorkspaces(): Promise<Workspace[]> {
+  const shared = await getSharedWorkspace();
+  if (shared) return [shared];
+
   const supabase = await createClient();
   const { data } = await supabase
     .from("workspaces")
@@ -340,8 +364,7 @@ export async function sendMessage(
 }
 
 export async function getDashboardData(): Promise<DashboardData> {
-  const workspaces = await getWorkspaces();
-  const workspace = workspaces[0];
+  const workspace = (await getSharedWorkspace()) ?? (await getWorkspaces())[0];
   if (!workspace) {
     return {
       workspaces: [],
@@ -370,7 +393,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     .slice(0, 4);
 
   return {
-    workspaces,
+    workspaces: [workspace],
     recentMessages: recentMessages.sort(
       (a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()

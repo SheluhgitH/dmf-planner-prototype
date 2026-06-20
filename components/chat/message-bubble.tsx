@@ -56,15 +56,24 @@ export function MessageBubble({
         {message.attachments && message.attachments.length > 0 && (
           <div className="mt-2 space-y-2">
             {message.attachments.map((att) =>
-              att.mimeType?.startsWith("image/") && att.url ? (
-                <a key={att.id} href={att.url} target="_blank" rel="noreferrer">
-                  <img
-                    src={att.url}
-                    alt={att.fileName}
-                    className="max-h-48 rounded-lg border border-zinc-700"
-                  />
-                </a>
-              ) : (
+              att.mimeType?.startsWith("image/") ? (
+                att.url ? (
+                  <a key={att.id} href={att.url} target="_blank" rel="noreferrer">
+                    <img
+                      src={att.url}
+                      alt={att.fileName}
+                      className="max-h-48 rounded-lg border border-zinc-700"
+                    />
+                  </a>
+                ) : (
+                  <div
+                    key={att.id}
+                    className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-400"
+                  >
+                    {att.fileName} (loading…)
+                  </div>
+                )
+              ) : att.url ? (
                 <a
                   key={att.id}
                   href={att.url}
@@ -74,6 +83,13 @@ export function MessageBubble({
                 >
                   {att.fileName}
                 </a>
+              ) : (
+                <div
+                  key={att.id}
+                  className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-400"
+                >
+                  {att.fileName}
+                </div>
               )
             )}
           </div>
