@@ -1,25 +1,40 @@
 "use client";
 
 import { useState } from "react";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, CheckSquare, Pencil, Trash2, MessagesSquare } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ReactionPicker } from "@/components/chat/reaction-picker";
-import type { Message, User } from "@/lib/data/types";
+import { FilePreview } from "@/components/chat/file-preview";
+import { CreateTaskFromMessageDialog } from "@/components/chat/create-task-from-message-dialog";
+import type { Message, Project, User } from "@/lib/data/types";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
 export function MessageBubble({
   message,
   currentUser,
+  channelId,
+  projects = [],
   onReply,
+  onThread,
   onToggleReaction,
+  onEdit,
+  onDelete,
 }: {
   message: Message;
   currentUser: User;
+  channelId?: string;
+  projects?: Project[];
   onReply?: (message: Message) => void;
+  onThread?: (message: Message) => void;
   onToggleReaction?: (messageId: string, emoji: string, reactedByMe: boolean) => void;
+  onEdit?: (messageId: string, body: string) => Promise<void>;
+  onDelete?: (messageId: string) => Promise<void>;
 }) {
   const [showPicker, setShowPicker] = useState(false);
+  const [showTaskDialog, setShowTaskDialog] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editBody, setEditBody] = useState(message.body);
   const isOwn = message.authorId === currentUser.id;
 
   return (
@@ -40,7 +55,7 @@ export function MessageBubble({
           </span>
         </div>
 
-        {message.body.trim() && (
+        {message.body.trim() && !editing && (
           <p
             className={cn(
               "mt-1 rounded-lg px-3 py-2 text-sm",
@@ -52,46 +67,35 @@ export function MessageBubble({
             {message.body}
           </p>
         )}
+        {editing && (
+          <form
+            className="mt-1 space-y-2"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              await onEdit?.(message.id, editBody);
+              setEditing(false);
+            }}
+          >
+            <textarea
+              value={editBody}
+              onChange={(e) => setEditBody(e.target.value)}
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
+              rows={3}
+            />
+            <div className="flex gap-2">
+              <Button type="submit" size="sm">Save</Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        )}
 
         {message.attachments && message.attachments.length > 0 && (
           <div className="mt-2 space-y-2">
-            {message.attachments.map((att) =>
-              att.mimeType?.startsWith("image/") ? (
-                att.url ? (
-                  <a key={att.id} href={att.url} target="_blank" rel="noreferrer">
-                    <img
-                      src={att.url}
-                      alt={att.fileName}
-                      className="max-h-48 rounded-lg border border-zinc-700"
-                    />
-                  </a>
-                ) : (
-                  <div
-                    key={att.id}
-                    className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-400"
-                  >
-                    {att.fileName} (loading…)
-                  </div>
-                )
-              ) : att.url ? (
-                <a
-                  key={att.id}
-                  href={att.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-violet-300 hover:bg-zinc-800"
-                >
-                  {att.fileName}
-                </a>
-              ) : (
-                <div
-                  key={att.id}
-                  className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-400"
-                >
-                  {att.fileName}
-                </div>
-              )
-            )}
+            {message.attachments.map((att) => (
+              <FilePreview key={att.id} attachment={att} />
+            ))}
           </div>
         )}
 
@@ -153,12 +157,70 @@ export function MessageBubble({
             >
               <MessageSquare className="h-3 w-3" />
               Reply
+            </Button>
+          )}
+          {onThread && !message.parentMessageId && (
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              className="h-7 gap-1 px-2 text-xs text-zinc-500"
+              onClick={() => onThread(message)}
+            >
+              <MessagesSquare className="h-3 w-3" />
+              Thread
               {(message.replyCount ?? 0) > 0 && (
                 <span className="text-violet-400">({message.replyCount})</span>
               )}
             </Button>
           )}
+          {channelId && message.body.trim() && (
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              className="h-7 gap-1 px-2 text-xs text-zinc-500"
+              onClick={() => setShowTaskDialog(true)}
+            >
+              <CheckSquare className="h-3 w-3" />
+              Task
+            </Button>
+          )}
+          {isOwn && onEdit && (
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              className="h-7 px-2 text-xs text-zinc-500"
+              onClick={() => {
+                setEditBody(message.body);
+                setEditing(true);
+              }}
+            >
+              <Pencil className="h-3 w-3" />
+            </Button>
+          )}
+          {isOwn && onDelete && (
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              className="h-7 px-2 text-xs text-zinc-500"
+              onClick={() => void onDelete(message.id)}
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          )}
         </div>
+        {channelId && (
+          <CreateTaskFromMessageDialog
+            message={message}
+            channelId={channelId}
+            projects={projects}
+            open={showTaskDialog}
+            onOpenChange={setShowTaskDialog}
+          />
+        )}
       </div>
     </div>
   );

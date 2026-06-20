@@ -178,3 +178,69 @@ export async function getThreadRepliesAction(
   const replies = await getThreadReplies(parentMessageId);
   return { replies };
 }
+
+export async function editMessageAction(
+  messageId: string,
+  body: string
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { error } = await supabase
+    .from("messages")
+    .update({ body: body.trim() })
+    .eq("id", messageId)
+    .eq("author_id", user.id);
+
+  if (error) return { error: error.message };
+  return {};
+}
+
+export async function deleteMessageAction(
+  messageId: string
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { error } = await supabase
+    .from("messages")
+    .delete()
+    .eq("id", messageId)
+    .eq("author_id", user.id);
+
+  if (error) return { error: error.message };
+  return {};
+}
+
+export async function searchChannelMessagesAction(
+  channelId: string,
+  query: string
+): Promise<{ messages?: Message[]; error?: string }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("messages")
+    .select("id, channel_id, author_id, body, parent_message_id, created_at")
+    .eq("channel_id", channelId)
+    .ilike("body", `%${query}%`)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if (error) return { error: error.message };
+
+  const { getCurrentUser } = await import("@/lib/data/supabase/queries");
+  const currentUser = await getCurrentUser();
+
+  return {
+    messages: (data ?? []).map((row) => ({
+      id: row.id,
+      channelId: row.channel_id,
+      authorId: row.author_id,
+      body: row.body,
+      createdAt: row.created_at,
+      parentMessageId: row.parent_message_id ?? undefined,
+      author: currentUser ?? undefined,
+    })),
+  };
+}

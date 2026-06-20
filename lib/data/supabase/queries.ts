@@ -480,6 +480,52 @@ export async function sendMessage(
   if (!data) return { error: "Failed to send message" };
 
   const currentUser = await getCurrentUser();
+
+  // Parse @mentions and create notifications
+  const mentionPattern = /@([\w.-]+)/g;
+  const mentions = [...body.matchAll(mentionPattern)].map((m) => m[1].toLowerCase());
+  if (mentions.length > 0) {
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, display_name");
+    for (const profile of profiles ?? []) {
+      const name = profile.display_name.toLowerCase();
+      if (mentions.some((m) => name.includes(m) || m.includes(name.replace(/\s/g, "")))) {
+        await supabase.from("message_mentions").insert({
+          message_id: data.id,
+          mentioned_user_id: profile.id,
+        });
+        if (profile.id !== user.id) {
+          await supabase.from("notifications").insert({
+            user_id: profile.id,
+            type: "mention",
+            title: `${currentUser?.displayName ?? "Someone"} mentioned you`,
+            body: body.slice(0, 120),
+            link: `/chat/${channelId}`,
+          });
+        }
+      }
+    }
+  }
+
+  // Notify thread parent author on reply
+  if (parentMessageId) {
+    const { data: parent } = await supabase
+      .from("messages")
+      .select("author_id")
+      .eq("id", parentMessageId)
+      .single();
+    if (parent && parent.author_id !== user.id) {
+      await supabase.from("notifications").insert({
+        user_id: parent.author_id,
+        type: "thread_reply",
+        title: `${currentUser?.displayName ?? "Someone"} replied in a thread`,
+        body: body.slice(0, 120),
+        link: `/chat/${channelId}`,
+      });
+    }
+  }
+
   return {
     message: {
       id: data.id,
@@ -495,6 +541,10 @@ export async function sendMessage(
 
 export async function getDashboardData(): Promise<DashboardData> {
   const workspace = (await getSharedWorkspace()) ?? (await getWorkspaces())[0];
+  const user = await getCurrentUser();
+  const today = new Date().toISOString().split("T")[0];
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
+
   if (!workspace) {
     return {
       workspaces: [],
@@ -502,12 +552,14 @@ export async function getDashboardData(): Promise<DashboardData> {
       todaysTasks: [],
       upcomingEvents: [],
       activeProjects: [],
+      unreadMentions: 0,
+      assignedTasksDueSoon: [],
+      eventReminders: [],
     };
   }
 
   const channels = await getChannels(workspace.id);
   const recentMessages: DashboardData["recentMessages"] = [];
-  const today = new Date().toISOString().split("T")[0];
 
   for (const channel of channels.slice(0, 4)) {
     const messages = await getMessages(channel.id);
@@ -517,10 +569,38 @@ export async function getDashboardData(): Promise<DashboardData> {
     }
   }
 
-  const events = await getEvents(workspace.id);
+  const events = await getEvents(workspace.id, user?.id);
   const upcomingEvents = events
     .filter((e) => e.date >= today)
     .slice(0, 4);
+
+  const eventReminders = events.filter(
+    (e) => e.date === today || e.date === tomorrow
+  );
+
+  const projects = await getProjects();
+  const allTasks = projects.flatMap((p) =>
+    p.tasks.map((t) => ({ ...t, projectName: p.name }))
+  );
+  const todaysTasks = allTasks.filter((t) => t.dueDate === today);
+  const assignedTasksDueSoon = allTasks.filter(
+    (t) =>
+      t.assigneeId === user?.id &&
+      t.status !== "done" &&
+      t.dueDate &&
+      t.dueDate <= tomorrow
+  );
+
+  let unreadMentions = 0;
+  if (user) {
+    const supabase = await createClient();
+    const { count } = await supabase
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("read", false);
+    unreadMentions = count ?? 0;
+  }
 
   return {
     workspaces: [workspace],
@@ -528,17 +608,64 @@ export async function getDashboardData(): Promise<DashboardData> {
       (a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     ),
-    todaysTasks: [],
+    todaysTasks,
     upcomingEvents,
-    activeProjects: [],
+    activeProjects: projects.filter((p) => p.status === "active"),
+    unreadMentions,
+    assignedTasksDueSoon,
+    eventReminders,
   };
 }
 
 export async function getProjects(): Promise<Project[]> {
-  return [];
+  const supabase = await createClient();
+  const workspace = await getSharedWorkspace();
+  if (!workspace) return [];
+
+  const { data: projectRows } = await supabase
+    .from("projects")
+    .select("id, workspace_id, name, description, status")
+    .eq("workspace_id", workspace.id)
+    .order("created_at", { ascending: false });
+
+  if (!projectRows?.length) return [];
+
+  const projectIds = projectRows.map((p) => p.id);
+  const { data: taskRows } = await supabase
+    .from("tasks")
+    .select("id, project_id, title, status, due_date, assignee_id, source_message_id, source_channel_id")
+    .in("project_id", projectIds);
+
+  const tasksByProject = new Map<string, Project["tasks"]>();
+  for (const row of taskRows ?? []) {
+    const list = tasksByProject.get(row.project_id) ?? [];
+    list.push({
+      id: row.id,
+      projectId: row.project_id,
+      title: row.title,
+      status: row.status,
+      dueDate: row.due_date ?? undefined,
+      assigneeId: row.assignee_id ?? undefined,
+      sourceMessageId: row.source_message_id ?? undefined,
+      sourceChannelId: row.source_channel_id ?? undefined,
+    });
+    tasksByProject.set(row.project_id, list);
+  }
+
+  return projectRows.map((p) => ({
+    id: p.id,
+    workspaceId: p.workspace_id,
+    name: p.name,
+    description: p.description,
+    status: p.status,
+    tasks: tasksByProject.get(p.id) ?? [],
+  }));
 }
 
-export async function getEvents(workspaceId?: string): Promise<PlannerEvent[]> {
+export async function getEvents(
+  workspaceId?: string,
+  userId?: string
+): Promise<PlannerEvent[]> {
   const supabase = await createClient();
   let query = supabase
     .from("events")
@@ -551,15 +678,41 @@ export async function getEvents(workspaceId?: string): Promise<PlannerEvent[]> {
   }
 
   const { data } = await query;
+  const eventIds = (data ?? []).map((e) => e.id);
 
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    workspaceId: row.workspace_id,
-    title: row.title,
-    date: row.date,
-    time: row.time ?? undefined,
-    location: row.location ?? undefined,
-  }));
+  let rsvpMap = new Map<string, { myRsvp?: string; going: number; maybe: number }>();
+  if (eventIds.length > 0) {
+    const { data: rsvps } = await supabase
+      .from("event_rsvps")
+      .select("event_id, user_id, status")
+      .in("event_id", eventIds);
+
+    for (const id of eventIds) {
+      const eventRsvps = (rsvps ?? []).filter((r) => r.event_id === id);
+      rsvpMap.set(id, {
+        myRsvp: userId
+          ? eventRsvps.find((r) => r.user_id === userId)?.status
+          : undefined,
+        going: eventRsvps.filter((r) => r.status === "going").length,
+        maybe: eventRsvps.filter((r) => r.status === "maybe").length,
+      });
+    }
+  }
+
+  return (data ?? []).map((row) => {
+    const rsvp = rsvpMap.get(row.id);
+    return {
+      id: row.id,
+      workspaceId: row.workspace_id,
+      title: row.title,
+      date: row.date,
+      time: row.time ?? undefined,
+      location: row.location ?? undefined,
+      myRsvp: rsvp?.myRsvp as PlannerEvent["myRsvp"],
+      goingCount: rsvp?.going ?? 0,
+      maybeCount: rsvp?.maybe ?? 0,
+    };
+  });
 }
 
 export async function signIn(email: string, password: string) {

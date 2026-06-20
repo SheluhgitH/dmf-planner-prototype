@@ -19,6 +19,10 @@ import { Button } from "@/components/ui/button";
 import { logout } from "@/lib/auth/actions";
 import { cn } from "@/lib/utils";
 import type { Channel, User, Workspace } from "@/lib/data/types";
+import { useUnreadCounts } from "@/components/layout/unread-provider";
+import { NotificationBell } from "@/components/layout/notification-bell";
+import { NewDmDialog } from "@/components/chat/new-dm-dialog";
+import { CreateChannelButton } from "@/components/chat/create-channel-button";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -33,16 +37,24 @@ export function AppSidebar({
   workspace,
   channels,
   user,
-  unreadCounts = {},
+  members = [],
+  unreadCounts: initialUnread = {},
 }: {
   workspace: Workspace;
   channels: Channel[];
   user: User;
+  members?: User[];
   unreadCounts?: Record<string, number>;
 }) {
   const pathname = usePathname();
+  const liveUnread = useUnreadCounts();
+  const unreadCounts = { ...initialUnread, ...liveUnread };
   const [mobileOpen, setMobileOpen] = useState(false);
   const [channelsOpen, setChannelsOpen] = useState(true);
+  const [dmsOpen, setDmsOpen] = useState(true);
+
+  const publicChannels = channels.filter((c) => !c.isDm);
+  const dmChannels = channels.filter((c) => c.isDm);
 
   const sidebar = (
     <div className="flex h-full flex-col">
@@ -57,6 +69,7 @@ export function AppSidebar({
             </p>
             <p className="truncate text-xs text-zinc-500">Workspace</p>
           </div>
+          <NotificationBell />
         </div>
       </div>
 
@@ -98,32 +111,69 @@ export function AppSidebar({
                     </button>
                     {channelsOpen && (
                       <ul className="ml-2 space-y-0.5">
-                        {channels
-                          .filter((c) => !c.isDm)
-                          .map((channel) => (
-                            <li key={channel.id}>
-                              <Link
-                                href={`/chat/${channel.id}`}
-                                onClick={() => setMobileOpen(false)}
-                                className={cn(
-                                  "flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm",
-                                  pathname === `/chat/${channel.id}`
-                                    ? "bg-zinc-800 text-zinc-100"
-                                    : "text-zinc-500 hover:bg-zinc-800/50 hover:text-zinc-300"
-                                )}
-                              >
-                                <Hash className="h-3.5 w-3.5" />
-                                <span className="flex-1 truncate">{channel.name}</span>
-                                {(unreadCounts[channel.id] ?? 0) > 0 && (
+                        {publicChannels.map((channel) => (
+                          <li key={channel.id}>
+                            <Link
+                              href={`/chat/${channel.id}`}
+                              onClick={() => setMobileOpen(false)}
+                              className={cn(
+                                "flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm",
+                                pathname === `/chat/${channel.id}`
+                                  ? "bg-zinc-800 text-zinc-100"
+                                  : "text-zinc-500 hover:bg-zinc-800/50 hover:text-zinc-300"
+                              )}
+                            >
+                              <Hash className="h-3.5 w-3.5" />
+                              <span className="flex-1 truncate">{channel.name}</span>
+                              {(unreadCounts[channel.id] ?? 0) > 0 &&
+                                pathname !== `/chat/${channel.id}` && (
                                   <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-600 px-1.5 text-[10px] font-medium text-white">
                                     {unreadCounts[channel.id] > 9
                                       ? "9+"
                                       : unreadCounts[channel.id]}
                                   </span>
                                 )}
-                              </Link>
-                            </li>
-                          ))}
+                            </Link>
+                          </li>
+                        ))}
+                        <li>
+                          <CreateChannelButton />
+                        </li>
+                      </ul>
+                    )}
+                    <button
+                      onClick={() => setDmsOpen(!dmsOpen)}
+                      className="mt-2 flex w-full items-center gap-1 px-3 py-1 text-xs text-zinc-500 hover:text-zinc-300"
+                    >
+                      <ChevronDown
+                        className={cn(
+                          "h-3 w-3 transition-transform",
+                          !dmsOpen && "-rotate-90"
+                        )}
+                      />
+                      Direct Messages
+                    </button>
+                    {dmsOpen && (
+                      <ul className="ml-2 space-y-0.5">
+                        {dmChannels.map((channel) => (
+                          <li key={channel.id}>
+                            <Link
+                              href={`/chat/${channel.id}`}
+                              onClick={() => setMobileOpen(false)}
+                              className={cn(
+                                "flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm",
+                                pathname === `/chat/${channel.id}`
+                                  ? "bg-zinc-800 text-zinc-100"
+                                  : "text-zinc-500 hover:bg-zinc-800/50 hover:text-zinc-300"
+                              )}
+                            >
+                              <span className="flex-1 truncate">{channel.name}</span>
+                            </Link>
+                          </li>
+                        ))}
+                        <li>
+                          <NewDmDialog members={members} currentUserId={user.id} />
+                        </li>
                       </ul>
                     )}
                   </div>

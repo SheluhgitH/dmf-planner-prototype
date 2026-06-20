@@ -4,6 +4,7 @@ import {
   getChannels,
   getCurrentUser,
   getMessages,
+  getProjects,
   getWorkspace,
 } from "@/lib/data/provider";
 
@@ -23,11 +24,12 @@ export default async function ChannelPage({
     await joinSharedWorkspace();
   }
 
-  const [channels, messages, user, workspace] = await Promise.all([
+  const [channels, messages, user, workspace, projects] = await Promise.all([
     getChannels(),
     getMessages(channelId, { limit: 100 }),
     getCurrentUser(),
     getWorkspace(),
+    getProjects(),
   ]);
 
   const channel = channels.find((c) => c.id === channelId);
@@ -41,6 +43,7 @@ export default async function ChannelPage({
         workspaceId={workspace.id}
         initialMessages={messages}
         currentUser={user ?? { id: "guest", email: "", displayName: "Guest" }}
+        projects={projects}
       />
     </div>
   );

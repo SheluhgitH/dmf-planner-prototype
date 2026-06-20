@@ -9,11 +9,14 @@ import { isSupabaseConfigured } from "@/lib/config";
 import { createClient } from "@/lib/data/supabase/client";
 import {
   addReactionAction,
+  deleteMessageAction,
+  editMessageAction,
   getChannelMessagesAction,
   getOlderMessagesAction,
   getThreadRepliesAction,
   markChannelReadAction,
   removeReactionAction,
+  searchChannelMessagesAction,
   sendMessageAction,
   uploadChatAttachmentAction,
 } from "@/lib/actions/chat";
@@ -22,7 +25,7 @@ import {
   mergeMessageLists,
   saveCachedMessages,
 } from "@/lib/chat/message-cache";
-import type { Message, MessageReaction, User } from "@/lib/data/types";
+import type { Message, MessageReaction, Project, User } from "@/lib/data/types";
 
 const MESSAGE_PAGE_SIZE = 50;
 const INITIAL_MESSAGE_LIMIT = 100;
@@ -59,12 +62,14 @@ export function ChatView({
   workspaceId,
   initialMessages,
   currentUser,
+  projects = [],
 }: {
   channelId: string;
   channelName: string;
   workspaceId: string;
   initialMessages: Message[];
   currentUser: User;
+  projects?: Project[];
 }) {
   const [messages, setMessages] = useState<Message[]>(() =>
     mergeMessageLists(loadCachedMessages(channelId), initialMessages)
@@ -75,6 +80,8 @@ export function ChatView({
   const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Message[] | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const topRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -546,16 +553,65 @@ export function ChatView({
     }
   }
 
+  async function handleEdit(messageId: string, body: string) {
+    if (!isSupabaseConfigured()) return;
+    const { error } = await editMessageAction(messageId, body);
+    if (!error) {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === messageId ? { ...m, body } : m))
+      );
+    }
+  }
+
+  async function handleDelete(messageId: string) {
+    if (!isSupabaseConfigured()) return;
+    const { error } = await deleteMessageAction(messageId);
+    if (!error) {
+      setMessages((prev) => prev.filter((m) => m.id !== messageId));
+    }
+  }
+
+  async function handleSearch(query: string) {
+    setSearchQuery(query);
+    if (!query.trim()) {
+      setSearchResults(null);
+      return;
+    }
+    if (isSupabaseConfigured()) {
+      const { messages: results } = await searchChannelMessagesAction(
+        channelId,
+        query
+      );
+      setSearchResults(results ?? []);
+    } else {
+      setSearchResults(
+        messages.filter((m) =>
+          m.body.toLowerCase().includes(query.toLowerCase())
+        )
+      );
+    }
+  }
+
+  const displayMessages = searchResults ?? messages;
   const typingNames = Object.values(typingUsers);
 
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="shrink-0 border-b border-zinc-800 px-6 py-4">
-          <h1 className="flex items-center gap-2 text-lg font-semibold text-zinc-100">
-            <span className="text-zinc-500">#</span>
-            {channelName}
-          </h1>
+          <div className="flex items-center justify-between gap-4">
+            <h1 className="flex items-center gap-2 text-lg font-semibold text-zinc-100">
+              <span className="text-zinc-500">#</span>
+              {channelName}
+            </h1>
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => void handleSearch(e.target.value)}
+              placeholder="Search in channel..."
+              className="w-48 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500"
+            />
+          </div>
         </div>
 
         <div
@@ -585,23 +641,32 @@ export function ChatView({
             </div>
           )}
           <div className="space-y-4">
-            {messages.length === 0 ? (
+            {displayMessages.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <p className="text-sm text-zinc-400">
-                  No messages in #{channelName} yet.
+                  {searchResults
+                    ? "No messages match your search."
+                    : `No messages in #${channelName} yet.`}
                 </p>
-                <p className="mt-1 text-xs text-zinc-500">
-                  Say hello to start the conversation.
-                </p>
+                {!searchResults && (
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Say hello to start the conversation.
+                  </p>
+                )}
               </div>
             ) : (
-              messages.map((msg) => (
+              displayMessages.map((msg) => (
                 <MessageBubble
                   key={msg.id}
                   message={msg}
                   currentUser={currentUser}
-                  onReply={openThread}
+                  channelId={channelId}
+                  projects={projects}
+                  onReply={(m) => setReplyTo(m)}
+                  onThread={openThread}
                   onToggleReaction={handleToggleReaction}
+                  onEdit={isSupabaseConfigured() ? handleEdit : undefined}
+                  onDelete={isSupabaseConfigured() ? handleDelete : undefined}
                 />
               ))
             )}

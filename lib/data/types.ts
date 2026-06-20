@@ -63,6 +63,27 @@ export interface Task {
   status: "todo" | "in_progress" | "done";
   dueDate?: string;
   assigneeId?: string;
+  sourceMessageId?: string;
+  sourceChannelId?: string;
+}
+
+export interface Notification {
+  id: string;
+  userId: string;
+  type: "mention" | "thread_reply" | "task_assigned" | "event_reminder";
+  title: string;
+  body?: string;
+  link?: string;
+  read: boolean;
+  createdAt: string;
+}
+
+export interface SearchResult {
+  type: "message" | "task" | "event" | "channel" | "project";
+  id: string;
+  title: string;
+  subtitle?: string;
+  link: string;
 }
 
 export interface Project {
@@ -81,12 +102,18 @@ export interface PlannerEvent {
   date: string;
   time?: string;
   location?: string;
+  myRsvp?: "going" | "maybe" | "not_going";
+  goingCount?: number;
+  maybeCount?: number;
 }
 
 export interface DashboardData {
   workspaces: Workspace[];
   recentMessages: (Message & { channelName: string })[];
-  todaysTasks: Task[];
+  todaysTasks: (Task & { projectName?: string })[];
   upcomingEvents: PlannerEvent[];
   activeProjects: Project[];
+  unreadMentions: number;
+  assignedTasksDueSoon: (Task & { projectName?: string })[];
+  eventReminders: PlannerEvent[];
 }

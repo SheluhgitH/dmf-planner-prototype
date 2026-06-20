@@ -1,4 +1,4 @@
-import { getEvents } from "@/lib/data/provider";
+import { getEvents, getChannels } from "@/lib/data/provider";
 import {
   Card,
   CardContent,
@@ -6,6 +6,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { CreateEventButton } from "@/components/events/create-event-button";
+import { EventRsvpButtons } from "@/components/events/event-rsvp-buttons";
+import { ShareEventButton } from "@/components/events/share-event-button";
 
 function getDaysInMonth(year: number, month: number) {
   return new Date(year, month + 1, 0).getDate();
@@ -16,7 +18,7 @@ function getFirstDayOfMonth(year: number, month: number) {
 }
 
 export default async function EventsPage() {
-  const events = await getEvents();
+  const [events, channels] = await Promise.all([getEvents(), getChannels()]);
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth();
@@ -112,14 +114,20 @@ export default async function EventsPage() {
                   key={event.id}
                   className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3"
                 >
-                  <p className="font-medium text-zinc-200">{event.title}</p>
-                  <p className="text-xs text-zinc-500">
-                    {event.date}
-                    {event.time ? ` · ${event.time}` : ""}
-                  </p>
-                  {event.location && (
-                    <p className="text-xs text-zinc-500">{event.location}</p>
-                  )}
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-medium text-zinc-200">{event.title}</p>
+                      <p className="text-xs text-zinc-500">
+                        {event.date}
+                        {event.time ? ` · ${event.time}` : ""}
+                      </p>
+                      {event.location && (
+                        <p className="text-xs text-zinc-500">{event.location}</p>
+                      )}
+                    </div>
+                    <ShareEventButton eventId={event.id} channels={channels} />
+                  </div>
+                  <EventRsvpButtons event={event} />
                 </li>
               ))}
             </ul>

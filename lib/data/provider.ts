@@ -145,10 +145,13 @@ export async function getDashboardData(): Promise<DashboardData> {
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     ),
     todaysTasks: mockProjects
-      .flatMap((p) => p.tasks)
+      .flatMap((p) => p.tasks.map((t) => ({ ...t, projectName: p.name })))
       .filter((t) => t.dueDate === today),
     upcomingEvents: mockEvents.filter((e) => e.date >= today).slice(0, 4),
     activeProjects: mockProjects.filter((p) => p.status === "active"),
+    unreadMentions: 0,
+    assignedTasksDueSoon: [],
+    eventReminders: mockEvents.filter((e) => e.date === today),
   };
 }
 
@@ -171,7 +174,8 @@ export async function getEvents(): Promise<PlannerEvent[]> {
   if (isSupabaseConfigured()) {
     const { getEvents: getSupabaseEvents } = await import("./supabase/queries");
     const workspace = await getWorkspace();
-    return getSupabaseEvents(workspace.id);
+    const user = await getCurrentUser();
+    return getSupabaseEvents(workspace.id, user?.id);
   }
   return mockEvents;
 }

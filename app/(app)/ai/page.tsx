@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Card,
   CardContent,
@@ -10,35 +10,39 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Bot, FileText, Lightbulb, Mic } from "lucide-react";
+import {
+  generateFromChatContextAction,
+  getChannelsForAiAction,
+} from "@/lib/actions/ai";
 
 const tools = [
-  {
-    id: "rewrite",
-    icon: FileText,
-    title: "Script Rewrite",
-    description: "Polish and refine your scripts with AI assistance.",
-    placeholder: "Paste your script here...",
-  },
-  {
-    id: "ideas",
-    icon: Lightbulb,
-    title: "Idea Generator",
-    description: "Brainstorm concepts for your next project.",
-    placeholder: "Describe your project or theme...",
-  },
   {
     id: "summary",
     icon: Mic,
     title: "Meeting Summary",
-    description: "Turn meeting notes into actionable summaries.",
-    placeholder: "Paste meeting notes or transcript...",
+    description: "Summarize recent channel messages into bullets and action items.",
+    tool: "summary" as const,
+  },
+  {
+    id: "tasks",
+    icon: Lightbulb,
+    title: "Task Extractor",
+    description: "Suggest tasks from recent channel discussion.",
+    tool: "tasks" as const,
   },
   {
     id: "brief",
     icon: Bot,
     title: "Project Brief Generator",
-    description: "Create structured project briefs from a few bullet points.",
-    placeholder: "List key points for your project brief...",
+    description: "Draft a project brief from channel context.",
+    tool: "brief" as const,
+  },
+  {
+    id: "rewrite",
+    icon: FileText,
+    title: "Script Rewrite",
+    description: "Polish pasted text (manual input).",
+    tool: null,
   },
 ];
 
@@ -46,11 +50,31 @@ export default function AIToolsPage() {
   const [activeTool, setActiveTool] = useState(tools[0]);
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
+  const [channels, setChannels] = useState<{ id: string; name: string }[]>([]);
+  const [channelId, setChannelId] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  function handleDemo() {
-    setOutput(
-      `[Demo output — connect an AI API key to enable live generation]\n\nProcessed: "${input.slice(0, 80)}${input.length > 80 ? "..." : ""}"\n\nThis is a placeholder response. When Supabase and your AI provider are configured, this tool will generate real results.`
-    );
+  useEffect(() => {
+    void getChannelsForAiAction().then(({ channels: data }) => {
+      setChannels(data ?? []);
+      if (data?.[0]) setChannelId(data[0].id);
+    });
+  }, []);
+
+  async function handleGenerate() {
+    setLoading(true);
+    if (activeTool.tool && channelId) {
+      const { output: result, error } = await generateFromChatContextAction(
+        channelId,
+        activeTool.tool
+      );
+      setOutput(error ?? result ?? "");
+    } else {
+      setOutput(
+        `[Draft rewrite]\n\n${input}\n\n— Polished version would appear here when an AI provider is connected.`
+      );
+    }
+    setLoading(false);
   }
 
   return (
@@ -58,7 +82,7 @@ export default function AIToolsPage() {
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-zinc-100">AI Tools</h1>
         <p className="text-zinc-400">
-          Script rewrites, idea generation, and meeting summaries.
+          Generate drafts from your workspace chat context. Review before creating tasks.
         </p>
       </div>
 
@@ -91,21 +115,39 @@ export default function AIToolsPage() {
             <CardDescription>{activeTool.description}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={activeTool.placeholder}
-              rows={6}
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-violet-500"
-            />
-            <Button onClick={handleDemo} disabled={!input.trim()}>
-              Generate (Demo)
+            {activeTool.tool ? (
+              <select
+                value={channelId}
+                onChange={(e) => setChannelId(e.target.value)}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
+              >
+                {channels.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    #{c.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Paste your script here..."
+                rows={6}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-violet-500"
+              />
+            )}
+            <Button
+              onClick={() => void handleGenerate()}
+              disabled={loading || (activeTool.tool ? !channelId : !input.trim())}
+            >
+              {loading ? "Generating..." : "Generate draft"}
             </Button>
             {output && (
               <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-                <p className="whitespace-pre-wrap text-sm text-zinc-300">
-                  {output}
+                <p className="mb-2 text-xs text-amber-400">
+                  Draft — confirm before creating tasks or events
                 </p>
+                <p className="whitespace-pre-wrap text-sm text-zinc-300">{output}</p>
               </div>
             )}
           </CardContent>
