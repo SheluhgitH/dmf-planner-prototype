@@ -6,16 +6,19 @@ import { MessageComposer } from "@/components/chat/message-composer";
 import { ThreadPanel } from "@/components/chat/thread-panel";
 import { TypingIndicator } from "@/components/chat/typing-indicator";
 import { isSupabaseConfigured } from "@/lib/config";
+import { createClient } from "@/lib/data/supabase/client";
 import {
   addReactionAction,
+  getOlderMessagesAction,
   getThreadRepliesAction,
   markChannelReadAction,
   removeReactionAction,
   sendMessageAction,
   uploadChatAttachmentAction,
 } from "@/lib/actions/chat";
-import { createClient } from "@/lib/data/supabase/client";
 import type { Message, MessageReaction, User } from "@/lib/data/types";
+
+const MESSAGE_PAGE_SIZE = 50;
 
 function mergeReaction(
   reactions: MessageReaction[] | undefined,
@@ -85,23 +88,109 @@ export function ChatView({
   const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
   const [uploadError, setUploadError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const topRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const broadcastRef = useRef<ReturnType<
     ReturnType<typeof createClient>["channel"]
   > | null>(null);
+  const [hasMore, setHasMore] = useState(initialMessages.length >= MESSAGE_PAGE_SIZE);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const messagesRef = useRef(messages);
+  const hasMoreRef = useRef(hasMore);
+  const loadingMoreRef = useRef(loadingMore);
 
   useEffect(() => {
-    setMessages((prev) => mergeMessages(prev, initialMessages));
-  }, [initialMessages]);
+    messagesRef.current = messages;
+  }, [messages]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, threadReplies]);
+    hasMoreRef.current = hasMore;
+  }, [hasMore]);
 
   useEffect(() => {
-    if (isSupabaseConfigured()) {
-      markChannelReadAction(channelId);
+    loadingMoreRef.current = loadingMore;
+  }, [loadingMore]);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+  }, []);
+
+  useEffect(() => {
+    setMessages(initialMessages);
+    setHasMore(initialMessages.length >= MESSAGE_PAGE_SIZE);
+  }, [channelId, initialMessages]);
+
+  useEffect(() => {
+    if (initialMessages.length > 0) {
+      scrollToBottom("instant");
     }
+  }, [channelId, initialMessages, scrollToBottom]);
+
+  useEffect(() => {
+    if (!loadingMore && messages.length > initialMessages.length) {
+      scrollToBottom("smooth");
+    }
+  }, [messages.length, loadingMore, initialMessages.length, scrollToBottom]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    markChannelReadAction(channelId);
+  }, [channelId]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) return;
+
+    const handleScroll = async () => {
+      if (
+        scrollEl.scrollTop > 80 ||
+        !hasMoreRef.current ||
+        loadingMoreRef.current
+      ) {
+        return;
+      }
+
+      const oldestMessageId = messagesRef.current[0]?.id;
+      if (!oldestMessageId) return;
+
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+
+      const scrollHeightBefore = scrollEl.scrollHeight;
+      const { messages: olderMessages, error } = await getOlderMessagesAction(
+        channelId,
+        oldestMessageId,
+        MESSAGE_PAGE_SIZE
+      );
+
+      if (error) {
+        setHasMore(false);
+      } else if (olderMessages?.length) {
+        setMessages((prev) => [...olderMessages, ...prev]);
+        if (olderMessages.length < MESSAGE_PAGE_SIZE) {
+          setHasMore(false);
+        }
+        requestAnimationFrame(() => {
+          if (scrollRef.current) {
+            scrollRef.current.scrollTop =
+              scrollRef.current.scrollHeight - scrollHeightBefore;
+          }
+        });
+      } else {
+        setHasMore(false);
+      }
+
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    };
+
+    scrollEl.addEventListener("scroll", handleScroll, { passive: true });
+    return () => scrollEl.removeEventListener("scroll", handleScroll);
   }, [channelId]);
 
   const upsertMessage = useCallback((msg: Message) => {
@@ -161,6 +250,7 @@ export function ChatView({
     },
     [currentUser.id, threadParent?.id]
   );
+
 
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
@@ -427,33 +517,54 @@ export function ChatView({
   const typingNames = Object.values(typingUsers);
 
   return (
-    <div className="flex h-full">
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="border-b border-zinc-800 px-6 py-4">
+    <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="shrink-0 border-b border-zinc-800 px-6 py-4">
           <h1 className="flex items-center gap-2 text-lg font-semibold text-zinc-100">
             <span className="text-zinc-500">#</span>
             {channelName}
           </h1>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto px-6 py-4"
+          ref={scrollRef}
+        >
+          <div ref={topRef} />
+          {loadingMore && (
+            <div className="py-2 text-center text-sm text-zinc-500">
+              Loading older messages...
+            </div>
+          )}
           <div className="space-y-4">
-            {messages.map((msg) => (
-              <MessageBubble
-                key={msg.id}
-                message={msg}
-                currentUser={currentUser}
-                onReply={openThread}
-                onToggleReaction={handleToggleReaction}
-              />
-            ))}
+            {messages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <p className="text-sm text-zinc-400">
+                  No messages in #{channelName} yet.
+                </p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Say hello to start the conversation.
+                </p>
+              </div>
+            ) : (
+              messages.map((msg) => (
+                <MessageBubble
+                  key={msg.id}
+                  message={msg}
+                  currentUser={currentUser}
+                  onReply={openThread}
+                  onToggleReaction={handleToggleReaction}
+                />
+              ))
+            )}
             <div ref={bottomRef} />
           </div>
         </div>
 
         <TypingIndicator names={typingNames} />
 
-        <MessageComposer
+        <div className="shrink-0">
+          <MessageComposer
           channelName={channelName}
           uploadError={uploadError}
           replyTo={
@@ -468,7 +579,8 @@ export function ChatView({
           onCancelReply={() => setReplyTo(null)}
           onSend={(body, file) => handleSend(body, file)}
           onTyping={broadcastTyping}
-        />
+          />
+        </div>
       </div>
 
       {threadParent && (

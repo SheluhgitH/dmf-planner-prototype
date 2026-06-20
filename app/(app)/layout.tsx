@@ -37,14 +37,16 @@ export default async function AppLayout({
   ]);
 
   return (
-    <div className="flex min-h-screen flex-col lg:flex-row">
+    <div className="flex h-screen flex-col overflow-hidden lg:flex-row">
       <AppSidebar
         workspace={workspace}
         channels={channels}
         user={user ?? { id: "guest", email: "", displayName: "Guest" }}
         unreadCounts={unreadCounts}
       />
-      <main className="flex flex-1 flex-col overflow-hidden">{children}</main>
+      <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {children}
+      </main>
     </div>
   );
 }

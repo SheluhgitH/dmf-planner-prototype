@@ -1,4 +1,5 @@
 import { ChatView } from "@/components/chat/chat-view";
+import { isSupabaseConfigured } from "@/lib/config";
 import {
   getChannels,
   getCurrentUser,
@@ -12,9 +13,17 @@ export default async function ChannelPage({
   params: Promise<{ channelId: string }>;
 }) {
   const { channelId } = await params;
+
+  if (isSupabaseConfigured()) {
+    const { joinSharedWorkspace } = await import(
+      "@/lib/data/supabase/queries"
+    );
+    await joinSharedWorkspace();
+  }
+
   const [channels, messages, user, workspace] = await Promise.all([
     getChannels(),
-    getMessages(channelId),
+    getMessages(channelId, { limit: 50 }),
     getCurrentUser(),
     getWorkspace(),
   ]);
@@ -23,12 +32,14 @@ export default async function ChannelPage({
   const channelName = channel?.name ?? channelId;
 
   return (
-    <ChatView
-      channelId={channelId}
-      channelName={channelName}
-      workspaceId={workspace.id}
-      initialMessages={messages}
-      currentUser={user ?? { id: "guest", email: "", displayName: "Guest" }}
-    />
+    <div className="flex min-h-0 flex-1 flex-col">
+      <ChatView
+        channelId={channelId}
+        channelName={channelName}
+        workspaceId={workspace.id}
+        initialMessages={messages}
+        currentUser={user ?? { id: "guest", email: "", displayName: "Guest" }}
+      />
+    </div>
   );
 }

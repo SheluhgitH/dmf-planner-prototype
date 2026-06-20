@@ -263,12 +263,19 @@ async function getSignedUrls(
 
 export async function getMessages(
   channelId: string,
-  options?: { parentId?: string | null; limit?: number }
+  options?: {
+    parentId?: string | null;
+    limit?: number;
+    beforeMessageId?: string;
+  }
 ): Promise<Message[]> {
   const supabase = await createClient();
+  await joinSharedWorkspace();
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  const isChannelFeed = options?.parentId === undefined;
 
   let query = supabase
     .from("messages")
@@ -278,21 +285,46 @@ export async function getMessages(
        message_attachments(id, storage_path, file_name, mime_type, file_size),
        message_reactions(emoji, user_id)`
     )
-    .eq("channel_id", channelId)
-    .order("created_at", { ascending: true });
+    .eq("channel_id", channelId);
 
-  if (options?.parentId === undefined) {
+  if (isChannelFeed) {
     query = query.is("parent_message_id", null);
-  } else if (options.parentId) {
-    query = query.eq("parent_message_id", options.parentId);
+
+    if (options?.beforeMessageId) {
+      const { data: beforeMessage } = await supabase
+        .from("messages")
+        .select("created_at")
+        .eq("id", options.beforeMessageId)
+        .single();
+      if (beforeMessage) {
+        query = query.lt("created_at", beforeMessage.created_at);
+      }
+    }
+
+    query = query.order("created_at", { ascending: false });
+    if (options?.limit) {
+      query = query.limit(options.limit);
+    }
+  } else {
+    query = query.order("created_at", { ascending: true });
+    if (options?.parentId) {
+      query = query.eq("parent_message_id", options.parentId);
+    }
+    if (options?.limit) {
+      query = query.limit(options.limit);
+    }
   }
 
-  if (options?.limit) {
-    query = query.limit(options.limit);
+  const { data, error } = await query;
+  if (error) {
+    console.error("getMessages failed:", error.message);
+    return [];
   }
-
-  const { data } = await query;
-  const rows = (data ?? []) as MessageRow[];
+  const rows = (
+    isChannelFeed && (options?.limit || options?.beforeMessageId)
+      ? [...(data ?? [])].reverse()
+      : (data ?? [])
+  ) as MessageRow[];
 
   const { data: replyData } = await supabase
     .from("messages")
@@ -355,6 +387,7 @@ export async function getChannelUnreadCounts(
       .from("messages")
       .select("id", { count: "exact", head: true })
       .eq("channel_id", channel.id)
+      .is("parent_message_id", null)
       .neq("author_id", userId);
 
     if (lastRead) {

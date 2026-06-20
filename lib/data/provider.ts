@@ -71,7 +71,11 @@ export async function getChannels(workspaceId?: string): Promise<Channel[]> {
 
 export async function getMessages(
   channelId: string,
-  options?: { parentId?: string | null; limit?: number }
+  options?: {
+    parentId?: string | null;
+    limit?: number;
+    beforeMessageId?: string;
+  }
 ): Promise<Message[]> {
   if (isSupabaseConfigured()) {
     const { getMessages: getSupabaseMessages } = await import(

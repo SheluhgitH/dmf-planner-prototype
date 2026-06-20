@@ -141,6 +141,16 @@ export async function markChannelReadAction(
   return {};
 }
 
+export async function getOlderMessagesAction(
+  channelId: string,
+  beforeMessageId: string,
+  limit = 20
+): Promise<{ messages?: Message[]; error?: string }> {
+  const { getMessages } = await import("@/lib/data/supabase/queries");
+  const messages = await getMessages(channelId, { limit, beforeMessageId });
+  return { messages };
+}
+
 export async function getThreadRepliesAction(
   parentMessageId: string
 ): Promise<{ replies?: Message[]; error?: string }> {
