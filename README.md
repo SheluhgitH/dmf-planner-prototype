@@ -1,36 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DMF Planner
 
-## Getting Started
+Your team's central brain for planning, messaging, sharing scripts, organizing projects, and leveling up together.
 
-First, run the development server:
+## Quick Start
+
+No backend required for local development:
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- **Landing page** at `/`
+- **Demo login** at `/login` — any email/password works in mock mode
+- **App** at `/dashboard`, `/chat`, `/projects`, `/events`, `/ai`, `/settings`
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Deploy to Vercel
 
-## Learn More
+1. Push this repo to GitHub
+2. Import in [Vercel](https://vercel.com/new)
+3. Deploy — no env vars needed for the demo site
 
-To learn more about Next.js, take a look at the following resources:
+## Connect Supabase (optional)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Create a project at [supabase.com](https://supabase.com)
+2. Copy `.env.local.example` to `.env.local` and fill in your keys
+3. Run the migration in `supabase/migrations/001_foundation.sql` via the Supabase SQL editor
+4. Add the same env vars in Vercel project settings
+5. Set Supabase Auth redirect URL to `https://your-domain.com/auth/callback`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+When env vars are set, the app automatically switches from mock data to live Supabase auth, database, and realtime chat.
 
-## Deploy on Vercel
+## Stack
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Frontend:** Next.js 16 + TypeScript + Tailwind CSS
+- **Backend:** Supabase (Auth, Postgres, Realtime, Storage)
+- **Deploy:** Vercel
