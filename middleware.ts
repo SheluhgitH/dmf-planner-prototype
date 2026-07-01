@@ -4,41 +4,32 @@ import {
   isProtectedRoute,
   isSupabaseConfigured,
 } from "@/lib/config";
-import { updateSession } from "@/lib/data/supabase/middleware";
+import {
+  hasSupabaseAuthCookie,
+  updateSession,
+} from "@/lib/data/supabase/middleware";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-
-  if (!isProtectedRoute(pathname)) {
-    if (isSupabaseConfigured()) {
-      return updateSession(request);
-    }
-    return NextResponse.next();
-  }
+  const protectedRoute = isProtectedRoute(pathname);
 
   if (isSupabaseConfigured()) {
-    const response = await updateSession(request);
-    const supabase = await import("@supabase/ssr").then(({ createServerClient }) =>
-      createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-          cookies: {
-            getAll() {
-              return request.cookies.getAll();
-            },
-            setAll() {},
-          },
-        }
-      )
-    );
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
+    // Avoid a Supabase round-trip on public pages for anonymous visitors.
+    if (!protectedRoute && !hasSupabaseAuthCookie(request)) {
+      return NextResponse.next();
+    }
+
+    const { response, user } = await updateSession(request);
+
+    if (protectedRoute && !user) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
+
     return response;
+  }
+
+  if (!protectedRoute) {
+    return NextResponse.next();
   }
 
   const mockSession = request.cookies.get(MOCK_SESSION_COOKIE);
